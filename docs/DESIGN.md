@@ -214,13 +214,16 @@ Daily budget against 10,000 units, at the measured k=5 rate of ~5 videos/bucket:
 
 | Call                               | Unit cost  | Per day   | Units |
 | ---------------------------------- | ---------- | --------- | ----- |
-| `search.list` (new buckets)        | 100        | ~66       | 6,600 |
-| `search.list` (rolling re-harvest) | 100        | ~28       | 2,800 |
+| `search.list` (new buckets)        | 100        | ~62       | 6,200 |
+| `search.list` (rolling re-harvest) | 100        | ~27       | 2,700 |
 | `videos.list` enrichment           | 1 / 50 IDs | ~10 calls | 10    |
+| Re-validation sweep (§5.3)         | 1 / 50 IDs | 25,000    | 500   |
 | Reserve                            |            |           | ~590  |
 
-≈ 94 buckets/night, of which ~83% exhaust, x ~5 members = **~390 new videos/night**, each
-fully enriched. That is ~140k/year, against a prefix space that takes over a millennium to
+62 + 27 ≈ 89 buckets/night, of which ~83% exhaust, x ~5 members = **~370 new
+videos/night**, each fully enriched. `HARVEST_UNITS` defaults to 9,000 rather than the
+full 10,000 precisely because the sweep shares the day and the reserve has to survive a
+retry. That is ~140k/year, against a prefix space that takes over a millennium to
 exhaust.
 
 ## 3.7 Choosing k: measured, not derived
@@ -365,11 +368,27 @@ identifies "home video of somebody's kids", and we do not pretend otherwise.
 
 ### 5.3 Quarantine window
 
-Harvest, hold 7 days, re-validate, then serve. Videos YouTube removes in that window never
-reach a viewer. Revision 1 framed this sweep as staleness hygiene; it is actually the
-primary safety mechanism. NOTE: nothing currently schedules it — it is a manual
-`npm run revalidate` (see docs/OPERATIONS.md). Automating it is the outstanding
-follow-up, and until then the cadence is whatever an operator actually does.
+Videos uploaded in the last 30 days are held back at harvest time, so YouTube's own
+moderation has a window to act before anything reaches a viewer.
+
+Beyond that, `scripts/revalidate.mjs` runs nightly as a step in `harvest.yml` and
+re-checks a **slice** of the pool, advancing a `sweepCursor` in `state.json` and wrapping
+at the end. It tombstones only permanent states — deleted, or made private. Toggle-governed
+filters (age-restriction, embeddability) are deliberately never tombstoned: the viewer can
+lift those, so a tombstone would convert a filter into a removal they cannot undo.
+
+**Why a slice.** A full sweep costs 1 unit per 50 videos, so it grows without bound — 20%
+of a day's entire quota at 100k videos, more than a whole day past ~500k. The cursor makes
+the cost constant and the coverage _period_ the thing that grows, which is an explicit dial
+rather than a cliff. At the default 500 units (25,000 records) a pool under ~25k is fully
+re-checked every night; 100k is covered every ~4 nights.
+
+**What it is not.** Revision 2 called this the primary safety mechanism. It isn't: a
+deleted video cannot play, because YouTube enforces removal at playback, and the client's
+`onError` already hides it and auto-advances. The sweep's real value is removing dead
+entries pool-wide rather than per-viewer, and keeping the served count honest. The
+mechanisms that actually protect a viewer are the ones acting _before_ playback — no
+autoplay, the age-restriction filter, the 30-day upload quarantine, and the blocklist.
 
 ### 5.4 Report path, blocklist, kill switch
 

@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       units:
-        description: 'Quota units to spend (max 10000/day)'
+        description: 'Quota units to spend on harvesting (sweep uses ~500 more)'
         required: false
-        default: '9500'
+        default: '9000'
       baseline_reset:
         description: 'Relearn the yield baseline from this run (accepts a permanently changed yield)'
         type: boolean
@@ -101,12 +101,84 @@ jobs:
         id: run
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          HARVEST_UNITS: ${{ github.event.inputs.units || '9500' }}
+          HARVEST_UNITS: ${{ github.event.inputs.units || '9000' }}
           # Only ever '1' or unset. Documented recovery was "clear baselineYield on the
           # pool branch by hand", which bypasses the relearn guard and can leave the gate
           # disarmed with no warning; this path keeps that guard.
           HARVEST_BASELINE_RESET: ${{ inputs.baseline_reset && '1' || '' }}
         run: node scripts/harvest.mjs
+
+      # Incremental re-validation, sharing the same pool checkout and the same publish
+      # step. Nightly rather than weekly because the cursor makes each run a fixed cost:
+      # 500 units covers 25,000 records, so a 100k pool is fully re-checked every ~4
+      # nights. Non-fatal — a sweep failure must not discard a good harvest.
+      - name: Re-validate a slice of the pool
+        continue-on-error: true
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          REVALIDATE_UNITS: '500'
+        run: node scripts/revalidate.mjs
+
+      # The sweep refuses to act on a window whose removal rate looks like an API-wide
+      # fault rather than real deletions, and it deliberately exits 0 and advances the
+      # cursor so one bad window cannot wedge the sweep forever. That makes the refusal
+      # invisible unless something reads the flag — this step is that reader.
+      # A `::warning::` on an otherwise-green run notifies nobody — you only see it by
+      # opening the run. Route this into the same harvester-health issue the hard
+      # failures use, because that emails.
+      # Both steps are non-fatal by construction, for the same reason the sweep itself is:
+      # this is an informational post about a run that otherwise SUCCEEDED, and a failure
+      # here would skip Publish and discard the night's harvest — then file a "run failed"
+      # issue blaming the harvest for it. The detection swallows a missing or malformed
+      # manifest (the sweep runs under continue-on-error, so it may not have written one)
+      # and the report tolerates a GitHub API hiccup.
+      - name: Did the sweep refuse its findings?
+        id: sweep
+        run: |
+          node -e "
+            let refused = false
+            try {
+              refused = require('./public/data/pool/manifest.json').stats?.lastSweep?.refused === true
+            } catch (e) {
+              console.error('could not read the sweep result: ' + e.message)
+            }
+            process.stdout.write('refused=' + refused + '\n')
+          " >> "$GITHUB_OUTPUT"
+
+      - name: Report a refused sweep
+        if: steps.sweep.outputs.refused == 'true'
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const body = [
+              `Re-validation **refused** this window's findings: it would have removed more`,
+              `of the window than the mass-removal guard allows, which is far more likely to`,
+              `be a bad API response than reality.`,
+              ``,
+              `Nothing was tombstoned for that window, and the cursor still advanced — the`,
+              `sweep is NOT wedged, and the window is re-examined on the next full pass.`,
+              `One of these is routine. Several nights running is not: check whether`,
+              `videos.list is returning empty items for valid ids.`,
+              ``,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n')
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'harvester-health',
+            })
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: 'Harvester health: re-validation refused a window',
+                body, labels: ['harvester-health'],
+              })
+            }
 
       - name: Verify pool invariants before publishing
         run: node scripts/check-pool.mjs

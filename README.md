@@ -38,8 +38,8 @@ audience. So the site:
 - **defaults to excluding** age-restricted and non-embeddable videos (toggle in the
   footer)
 - **holds back** videos uploaded in the last 30 days, while moderation catches up
-- **re-validates** the pool, dropping anything removed or made private (run manually
-  today — automating it is an open follow-up)
+- **re-validates** the pool nightly, dropping anything removed or made private (a slice
+  per night, so the cost stays flat as the pool grows)
 - offers a control on every draw that hides the video for you in this browser (best
   effort — it needs local storage, and the list is capped), and additionally opens a
   prefilled report to send when a contact address is configured (`VITE_REPORT_EMAIL`)

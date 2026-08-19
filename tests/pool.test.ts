@@ -200,7 +200,7 @@ describe('toggle-governed filters are filters, not deletions', () => {
 })
 
 describe('tombstones', () => {
-  // The weekly sweep writes tombstones.json, and it was deployed but never fetched — so
+  // The re-validation sweep writes tombstones.json, and it was deployed but never fetched — so
   // videos YouTube had removed kept being drawn while three comments claimed the client
   // filtered them. These pin that the exclusion set is honoured however it is composed.
   it('never draws a tombstoned id', async () => {

@@ -6,11 +6,11 @@ Everything here exists to make that loud.
 
 ## Daily rhythm
 
-| When                  | What                                          | Where                           |
-| --------------------- | --------------------------------------------- | ------------------------------- |
-| 08:17 UTC daily       | Harvest ~94 buckets, push to `pool`, redeploy | `.github/workflows/harvest.yml` |
-| On push to `main`     | Build + deploy the site                       | `.github/workflows/deploy.yml`  |
-| Weekly (manual today) | Re-validation sweep                           | `npm run revalidate`            |
+| When                   | What                                         | Where                           |
+| ---------------------- | -------------------------------------------- | ------------------------------- |
+| 08:17 UTC daily        | Harvest ~89 buckets, sweep 25k records, push | `.github/workflows/harvest.yml` |
+| On push to `main`      | Build + deploy the site                      | `.github/workflows/deploy.yml`  |
+| Nightly (with harvest) | Re-validation sweep                          | `harvest.yml` step              |
 
 ## Branches
 
@@ -175,7 +175,7 @@ Run it against the live pool instead, using the `POOL_DIR` override so nothing h
 copied back and forth:
 
 The sweep refuses to write if a single run would remove more than 20% of what it checked
-— provided the removal count also clears a small floor that scales with the pool, so two
+— provided at least 3 removals are involved, so two
 genuine deletions on a young pool are not blocked — or if nothing at all survived — a `videos.list` response of HTTP 200 with an empty
 `items` array is neither a quota error nor a key error, and would otherwise tombstone the
 whole pool permanently. If a large cleanup really is legitimate, re-run with
@@ -197,7 +197,7 @@ the right follow-up.
 ## Manual operations
 
 ```bash
-npm run harvest                      # spend the default 9500 units
+npm run harvest                      # spend the default 9000 units
 HARVEST_UNITS=1000 npm run harvest   # a small run
 npm run revalidate                   # sweep for dead/removed videos
 npm run pool-stats                   # regenerate the numbers in RANDOMNESS.md

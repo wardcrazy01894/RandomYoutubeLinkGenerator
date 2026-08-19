@@ -62,12 +62,14 @@ export async function loadManifest(): Promise<Manifest> {
 }
 
 /**
- * IDs the re-validation sweep found gone or made private. (Run manually today;
- * scheduling it is an open follow-up.)
+ * IDs the re-validation sweep found gone or made private. The sweep runs nightly over a
+ * slice of the pool — see `.github/workflows/harvest.yml`.
  *
  * This was written by `scripts/revalidate.mjs` and deployed, but never fetched — so the
- * sweep that docs/DESIGN.md §5.3 calls the primary safety mechanism produced output no
- * viewer ever saw, and videos YouTube had already removed kept being served.
+ * sweep produced output no viewer ever saw, and videos YouTube had already removed kept
+ * being served. (DESIGN §5.3 no longer calls the sweep the primary safety mechanism: a
+ * deleted video cannot play, and onError already hides it. Fetching this still matters,
+ * because it keeps the served count honest rather than per-viewer.)
  */
 export async function loadTombstones(): Promise<string[]> {
   try {
