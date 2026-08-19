@@ -21,7 +21,9 @@ const STALE_AFTER_DAYS = 3
 // pct-encoded local-part like '%2B' for '+' is fine, so plus-aliases survive either
 // way). Validating instead means a malformed repo variable degrades to the honest
 // hide-only path rather than shipping a mailto no client can use.
-const REPORT_ADDRESS_RE = /^[^\s@,?&]+@[^\s@,?&]+\.[^\s@,?&]+$/
+// '#' is excluded too: an address containing one turns the rest of the mailto into a URL
+// fragment, so subject and body vanish silently.
+const REPORT_ADDRESS_RE = /^[^\s@,?&#]+@[^\s@,?&#]+\.[^\s@,?&#]+$/
 const RAW_REPORT_TO = import.meta.env.VITE_REPORT_EMAIL ?? ''
 const REPORT_TO = REPORT_ADDRESS_RE.test(RAW_REPORT_TO) ? RAW_REPORT_TO : ''
 
@@ -199,8 +201,7 @@ function report(): void {
       'Thanks — that video is hidden for you, and your report is ready to send.',
     )
   } else {
-    // Never claim a report was filed when nothing was sent. The deployed bundle had no
-    // mailto at all, yet still showed the "flagged for removal" banner.
+    // Never claim a report was filed when nothing was sent.
     showBanner('That video is now hidden for you.')
   }
   void draw()

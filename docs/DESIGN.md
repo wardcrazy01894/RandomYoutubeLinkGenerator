@@ -362,8 +362,14 @@ primary safety mechanism, and it runs weekly.
 
 ### 5.4 Report path, blocklist, kill switch
 
-A Report control on every draw; `data/blocklist.json` is filtered at draw time and honoured
-by the sweep; a contact address in the footer; and a documented 60-second kill switch.
+A control on every draw that always hides the video for the viewer, and additionally opens
+a prefilled report when a contact address is configured (`VITE_REPORT_EMAIL`); with no
+address the control is labelled "Hide this video" and files nothing, rather than claiming
+to. `blocklist.json` is filtered at draw time, is authoritative on `main`, and is honoured
+by the sweep. Plus a documented 60-second kill switch.
+
+The contact address lives only in that control, not as a separate footer mailto — one
+scrapeable address is enough, and a second would claim a channel nobody monitors.
 
 Reports **must not** route to public GitHub issues — that would build a searchable public
 index of the worst content on the site.
