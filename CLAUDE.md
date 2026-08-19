@@ -15,7 +15,22 @@ nothing crashes and every test passes.
    whole. A truncated bucket is truncated in _relevance_ order, so what survives skews
    popular — the exact bias this method exists to defeat.
 3. **Never use `Math.random`.** `src/random.ts` (CSPRNG + rejection sampling) is the only
-   source of randomness. ESLint enforces this.
+   source of randomness in the client; scripts use `randomInt()` from `node:crypto`.
+
+   Two independent layers enforce this, and both are verified by mutation rather than
+   assumed:
+   - `eslint.config.js` — `no-restricted-syntax` selectors covering `Math.random`,
+     `Math['random']`, `globalThis.Math.random`, and aliasing/destructuring of `Math`.
+     The block has **no `files` key on purpose**: it must apply to every linted file.
+   - `tests/no-math-random.test.mjs` — scans `src/` and `scripts/` as text, so it still
+     holds if the lint config is narrowed, misscoped, or stops matching.
+
+   That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`
+   only, leaving `scripts/lib/prefix.mjs` — the Feistel sampler — completely unguarded,
+   and it carried a `no-restricted-globals: [{ name: 'Math.random' }]` entry that was
+   **dead config** and never fired once. Do not re-add a rule here without proving it
+   fires.
+
 4. **Never reject-and-advance.** When a draw lands on an excluded video, redraw. Advancing
    to `i+1` hands that video's probability mass to its neighbour.
 5. **Never authenticate the harvester.** API key only — no OAuth, no cookies, no session.

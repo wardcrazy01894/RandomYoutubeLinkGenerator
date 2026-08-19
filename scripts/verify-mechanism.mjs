@@ -12,6 +12,7 @@
 //
 // Usage: YOUTUBE_API_KEY=... node scripts/verify-mechanism.mjs [numProbes]
 
+import { randomInt } from 'node:crypto'
 import { searchPage } from './lib/youtube.mjs'
 import { prefixAt, PREFIX_SPACE, PREFIX_LENGTH } from './lib/prefix.mjs'
 import { loadKey } from './lib/env.mjs'
@@ -52,7 +53,7 @@ console.log(
 let matched = 0
 let pagesAtCap = 0
 for (let i = 0; i < probes; i++) {
-  const q = prefixAt('verify', Math.floor(Math.random() * PREFIX_SPACE))
+  const q = prefixAt('verify', randomInt(PREFIX_SPACE))
   const { ids, totalResults } = await searchPage(key, q)
   const inBucket = ids.filter((id) => id.toLowerCase().startsWith(`${q}-`))
   matched += inBucket.length
