@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.13"
   },
   "description": "A button that gives you a genuinely random YouTube video — uniform sampling of YouTube's public corpus, not a curated list.",
   "scripts": {
@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.2.0",
+    "@types/node": "^22.20.1",
     "eslint": "^10.8.1",
     "globals": "^17.11.0",
     "prettier": "^3.3.3",

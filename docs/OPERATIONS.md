@@ -83,6 +83,10 @@ allowed to create a Pages site, so `deploy-pages.yml` deliberately does not try:
 ```bash
 gh api -X POST repos/wardcrazy01894/RandomYoutubeLinkGenerator/pages -f build_type=workflow
 gh secret set YOUTUBE_API_KEY --repo wardcrazy01894/RandomYoutubeLinkGenerator
+# The report address is a repo VARIABLE, not a secret: it is inlined into the public
+# bundle (a mailto cannot work otherwise), so Variables is the correct home. Without it
+# the report control degrades to hide-only.
+gh variable set VITE_REPORT_EMAIL --repo wardcrazy01894/RandomYoutubeLinkGenerator --body '<address>'
 bash scripts/protect-main.sh
 ```
 

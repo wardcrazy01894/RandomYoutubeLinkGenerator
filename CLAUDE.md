@@ -48,7 +48,7 @@ Keep these current in the same PR as the change:
 - TypeScript strict; Prettier (no semicolons, single quotes, trailing commas)
 - Actions pinned by commit SHA with a version comment
 - `main` is protected: PR-only, 0 approvals, required checks
-  `build / typecheck / lint`, `test`, `secret scan`
+  `build / typecheck / lint`, `test`, `secret scan`, `pool integrity`
 - The `pool` branch is intentionally unprotected — see `docs/OPERATIONS.md`
 
 ## Every PR gets an adversarial review
