@@ -24,14 +24,17 @@ nothing crashes and every test passes.
      apply to every linted file, and no later block may redefine that rule (flat config
      is later-wins per rule, so doing so deletes these selectors for whatever it
      matches).
-   - `tests/no-math-random.test.mjs` — two checks. It scans `src/` and `scripts/` as
-     text, which holds even if the lint config stops matching; and it drives ESLint's
-     API over probe paths **derived from the scanned tree**, so a block scoped to any
-     directory containing source — including a new one — is detected.
+   - `tests/no-math-random.test.mjs` — it resolves ESLint's **actual config for every
+     real source file** and asserts the rule is present at severity 2 with all its
+     selectors, and that the file is not ignored. It also scans the same files as text.
 
-   The text scan cannot see alias-form (`const M = Math; M.random()`), and the lint layer
-   can be scoped away, so neither alone is sufficient. Together they cover both: the
-   derived probes are what make the "scoped away" case detectable.
+   The two layers cover different failure modes, and neither alone is sufficient. The
+   text scan cannot see alias-form (`const M = Math; M.random()`), which only the lint
+   selectors catch. The lint layer can be disabled in four ways that all leave `eslint .`
+   exiting 0 — a block scoped by directory, by filename glob, or by extension, or an
+   `ignores` entry — and asking the resolved config about real files is what detects all
+   of them. Earlier versions linted _synthetic probe paths_ instead, which only ever
+   cover globs someone anticipated; three of those four attacks walked straight past.
 
    That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`
    only, leaving `scripts/lib/prefix.mjs` — the Feistel sampler — completely unguarded,
