@@ -20,6 +20,10 @@ export default tseslint.config(
   // as decoration, because a guard that looks like a second layer is worse than an
   // honest single one.
   {
+    // DO NOT set `no-restricted-syntax` in any later config block. Flat config is
+    // later-wins PER RULE, so a block further down that defines this rule silently
+    // deletes every selector below for the files it matches — which is precisely how
+    // this guard came to cover only src/**/*.ts. Extend this array instead.
     rules: {
       'no-restricted-syntax': [
         'error',

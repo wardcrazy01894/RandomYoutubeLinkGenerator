@@ -34,9 +34,25 @@ function walk(dir) {
 describe('Math.random is absent from the randomness-critical source', () => {
   const files = SCANNED.flatMap((d) => walk(join(ROOT, d)))
 
-  it('scans a non-trivial number of files', () => {
-    // Guards the guard: a broken walk would make every assertion below vacuous.
-    expect(files.length).toBeGreaterThan(5)
+  // Guards the guard. A file COUNT is not enough: scripts/ alone has enough files to
+  // satisfy any floor, so dropping 'src' from SCANNED left the client-side randomness
+  // unscanned while the suite stayed green. Assert the specific files that matter are
+  // actually being read.
+  it('actually scans the randomness-critical files', () => {
+    const relative = files.map((f) => f.slice(ROOT.length))
+    for (const sentinel of [
+      'src/random.ts', // the client CSPRNG draw
+      'src/pool.ts', // the uniform pick
+      'scripts/lib/prefix.mjs', // the Feistel sampler
+      'scripts/harvest.mjs',
+    ]) {
+      expect(relative).toContain(sentinel)
+    }
+    for (const dir of SCANNED) {
+      expect(
+        files.filter((f) => f.startsWith(join(ROOT, dir))).length,
+      ).toBeGreaterThan(1)
+    }
   })
 
   it.each(SCANNED)('finds no Math.random under %s/', (dirName) => {
@@ -45,6 +61,33 @@ describe('Math.random is absent from the randomness-critical source', () => {
       .filter((f) => FORBIDDEN.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(ROOT.length))
     expect(offenders).toEqual([])
+  })
+
+  // Makes CLAUDE.md's claim that BOTH layers are mutation-verified literally true: the
+  // lint selectors are config, and a typo in any of them would otherwise fail nothing.
+  it('has lint selectors that actually fire, for every accidental form', async () => {
+    const { ESLint } = await import('eslint')
+    const linter = new ESLint({ cwd: ROOT })
+    const offending = [
+      'export const a = Math.random()',
+      "export const b = Math['random']()",
+      'export const c = globalThis.Math.random()',
+      'const M = Math\nexport const d = M.random()',
+      'const { random } = Math\nexport const e = random()',
+    ]
+    for (const code of offending) {
+      const [res] = await linter.lintText(`${code}\n`, {
+        filePath: 'probe.mjs',
+      })
+      expect(res.errorCount, `should be rejected: ${code}`).toBeGreaterThan(0)
+    }
+    const [clean] = await linter.lintText(
+      'export const ok = Math.floor(1.5)\n',
+      {
+        filePath: 'probe.mjs',
+      },
+    )
+    expect(clean.errorCount, 'Math.floor must stay legal').toBe(0)
   })
 
   it('detects the patterns it claims to detect', () => {

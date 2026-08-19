@@ -17,8 +17,8 @@ nothing crashes and every test passes.
 3. **Never use `Math.random`.** `src/random.ts` (CSPRNG + rejection sampling) is the only
    source of randomness in the client; scripts use `randomInt()` from `node:crypto`.
 
-   Two independent layers enforce this, and both are verified by mutation rather than
-   assumed:
+   Two independent layers enforce this, and each has a committed self-check so neither
+   can go quietly dead:
    - `eslint.config.js` — `no-restricted-syntax` selectors covering `Math.random`,
      `Math['random']`, `globalThis.Math.random`, and aliasing/destructuring of `Math`.
      The block has **no `files` key on purpose**: it must apply to every linted file.
