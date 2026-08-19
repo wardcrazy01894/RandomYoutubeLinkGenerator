@@ -5,18 +5,15 @@ import { fileURLToPath } from 'node:url'
 
 // Defence in depth for the project's central claim.
 //
-// The lint rule in eslint.config.js is the primary guard, but it is CONFIG: it can be
-// narrowed, scoped away, or ignored out of existence. That has already happened once —
-// the rule lived inside a `files: ['src/**/*.ts']` block, leaving scripts/lib/prefix.mjs
-// (the Feistel sampler) unguarded — so this file checks it rather than trusting it.
+// The lint rule is CONFIG, and config has been wrong here in five distinct ways already:
+// scoped to src/**/*.ts only (the Feistel sampler unguarded); a companion rule that was
+// dead and never fired; disarmed per-directory, per-filename, per-extension, and via
+// `ignores`; and — the subtlest — kept at severity 2 with the right NUMBER of selectors
+// but four entirely different ones, leaving `Math.random()` live in src/random.ts with
+// every gate green.
 //
-// Two checks, deliberately different in kind:
-//   1. Resolve ESLint's ACTUAL config for every real source file and assert the guard is
-//      active there. Earlier versions linted synthetic probe paths instead, which only
-//      ever cover globs someone anticipated: blocks scoped to `scripts/**/prefix.mjs` or
-//      `**/*.js`, and `ignores` entries, all slipped past while the suite stayed green.
-//   2. Scan the same files as text, which holds even if the lint layer is bypassed by an
-//      inline eslint-disable comment.
+// So this file does not inspect the config's shape. It asks what ESLint actually DOES to
+// every file it lints, and separately scans the source as text.
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SCANNED = ['src', 'scripts']
@@ -24,6 +21,15 @@ const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.js']
 
 /** Math.random, Math?.random, Math['random'] — with arbitrary whitespace. */
 const FORBIDDEN = /Math\s*(?:\??\s*\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
+
+// Every accidental form, in one snippet. Each line must draw its own complaint.
+const OFFENDING = [
+  'export const aa = Math.random()',
+  "export const bb = Math['random']()",
+  'export const cc = globalThis.Math.random()',
+  'const MM = Math',
+  'const { random } = Math',
+].join('\n')
 
 function walk(dir) {
   const out = []
@@ -35,14 +41,12 @@ function walk(dir) {
   return out
 }
 
-const files = SCANNED.flatMap((d) => walk(join(ROOT, d)))
+const sourceFiles = SCANNED.flatMap((d) => walk(join(ROOT, d)))
 const rel = (f) => f.slice(ROOT.length)
 
 describe('Math.random is absent from the randomness-critical source', () => {
   it('actually scans the randomness-critical files', () => {
-    // Guards the guard. A file COUNT is not enough: scripts/ alone satisfies any floor,
-    // so dropping 'src' would leave the client-side draw unscanned while staying green.
-    const names = files.map(rel)
+    const names = sourceFiles.map(rel)
     for (const sentinel of [
       'src/random.ts', // the client CSPRNG draw
       'src/pool.ts', // the uniform pick
@@ -53,65 +57,62 @@ describe('Math.random is absent from the randomness-critical source', () => {
     }
   })
 
-  // Asks ESLint what it will actually do to each real file, rather than probing paths we
-  // invented. This is what catches file-glob scoping, extension scoping and `ignores`.
-  it('has the guard active in the resolved config for every source file', async () => {
+  // The load-bearing test. Asserting on config shape (severity, selector COUNT) is not
+  // enough — four unrelated selectors at severity 2 satisfied that while Math.random ran
+  // free. This lints the real forms against every file ESLint actually lints.
+  it('rejects every accidental form in every file ESLint lints', async () => {
     const { ESLint } = await import('eslint')
     const linter = new ESLint({ cwd: ROOT })
 
-    for (const file of files) {
-      expect(
-        await linter.isPathIgnored(file),
-        `${rel(file)} is not linted at all`,
-      ).toBe(false)
-      const config = await linter.calculateConfigForFile(file)
-      const rule = config.rules['no-restricted-syntax']
-      // A bare 'off' in a later block merges with the EARLIER options array, so the
-      // selectors are still listed while the rule is disabled. Severity is the only
-      // reliable signal — checking the selector count alone would pass under that attack.
-      const severity = Array.isArray(rule) ? rule[0] : rule
-      expect(severity, `Math.random guard is disarmed for ${rel(file)}`).toBe(2)
-      expect(
-        rule.length - 1,
-        `selectors were dropped for ${rel(file)}`,
-      ).toBeGreaterThanOrEqual(4)
+    const linted = (await linter.lintFiles(['.'])).map((r) => r.filePath)
+    expect(
+      linted.length,
+      'ESLint linted nothing — the check would be vacuous',
+    ).toBeGreaterThan(5)
+
+    // A source file missing from ESLint's own list means it was ignored out of linting
+    // entirely, which is how `ignores` silently removed the sampler.
+    for (const file of sourceFiles) {
+      expect(linted, `${rel(file)} is not linted at all`).toContain(file)
     }
-  })
 
-  it('has selectors that actually reject every accidental form', async () => {
-    const { ESLint } = await import('eslint')
-    const linter = new ESLint({ cwd: ROOT })
-    const offending = [
-      'export const aa = Math.random()',
-      "export const bb = Math['random']()",
-      'export const cc = globalThis.Math.random()',
-      'const MM = Math\nexport const dd = MM.random()',
-      'const { random } = Math\nexport const ee = random()',
-    ]
-    // Linted as a real, tracked file so the config resolution is the real one.
-    const filePath = join(ROOT, 'scripts', 'lib', 'prefix.mjs')
-    const banned = (res) =>
-      res.messages.filter((m) => m.ruleId === 'no-restricted-syntax')
-
-    for (const code of offending) {
-      const [res] = await linter.lintText(`${code}\n`, {
+    const unguarded = []
+    for (const filePath of linted) {
+      const [res] = await linter.lintText(`${OFFENDING}\n`, {
         filePath,
         warnIgnored: false,
       })
-      expect(banned(res), `should be rejected: ${code}`).not.toEqual([])
+      const hits = res.messages.filter(
+        (m) => m.ruleId === 'no-restricted-syntax' && m.severity === 2,
+      )
+      if (hits.length < 5) unguarded.push(`${rel(filePath)} (${hits.length}/5)`)
     }
-    const [clean] = await linter.lintText(
-      'export const ok = Math.floor(1.5)\n',
+    expect(
+      unguarded,
+      'Math.random guard is not enforced for these files',
+    ).toEqual([])
+  })
+
+  // A lone `/* eslint-disable no-restricted-syntax */` in a new file would otherwise
+  // disarm the guard with no config change, and the text scan cannot see the alias form.
+  it('forbids inline eslint-disable from switching the guard off', async () => {
+    const { ESLint } = await import('eslint')
+    const linter = new ESLint({ cwd: ROOT })
+    const [res] = await linter.lintText(
+      `/* eslint-disable no-restricted-syntax */\nconst MM = Math\nexport const x = MM.random()\n`,
       {
-        filePath,
+        filePath: join(ROOT, 'scripts', 'lib', 'prefix.mjs'),
         warnIgnored: false,
       },
     )
-    expect(banned(clean), 'Math.floor must stay legal').toEqual([])
+    expect(
+      res.messages.filter((m) => m.ruleId === 'no-restricted-syntax'),
+      'an inline disable comment switched the guard off',
+    ).not.toEqual([])
   })
 
   it.each(SCANNED)('finds no Math.random under %s/', (dirName) => {
-    const offenders = files
+    const offenders = sourceFiles
       .filter((f) => f.startsWith(join(ROOT, dirName)))
       .filter((f) => FORBIDDEN.test(readFileSync(f, 'utf8')))
       .map(rel)

@@ -24,6 +24,13 @@ export default tseslint.config(
     // later-wins PER RULE, so a block further down that defines this rule silently
     // deletes every selector below for the files it matches — which is precisely how
     // this guard came to cover only src/**/*.ts. Extend this array instead.
+    // Inline comments cannot switch this off. Without it, a single
+    // `/* eslint-disable no-restricted-syntax */` at the top of a new file disarms the
+    // guard with no config change at all — and the text-scan layer cannot see the alias
+    // form, so nothing would catch it. The repo uses no disable comments; if one ever
+    // becomes genuinely necessary, it has to be argued for here rather than added
+    // silently in a source file.
+    linterOptions: { noInlineConfig: true },
     rules: {
       'no-restricted-syntax': [
         'error',

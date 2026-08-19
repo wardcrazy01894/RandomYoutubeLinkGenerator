@@ -24,17 +24,21 @@ nothing crashes and every test passes.
      apply to every linted file, and no later block may redefine that rule (flat config
      is later-wins per rule, so doing so deletes these selectors for whatever it
      matches).
-   - `tests/no-math-random.test.mjs` — it resolves ESLint's **actual config for every
-     real source file** and asserts the rule is present at severity 2 with all its
-     selectors, and that the file is not ignored. It also scans the same files as text.
+   - `tests/no-math-random.test.mjs` — it lints every accidental form against **every
+     file ESLint actually lints**, requiring each to be rejected at severity 2. It checks
+     behaviour, not config shape: severity plus a selector COUNT was satisfied by four
+     entirely unrelated selectors while `Math.random()` ran free in `src/random.ts`. It
+     also asserts no source file has been ignored out of linting, and scans the source as
+     text.
 
    The two layers cover different failure modes, and neither alone is sufficient. The
    text scan cannot see alias-form (`const M = Math; M.random()`), which only the lint
-   selectors catch. The lint layer can be disabled in four ways that all leave `eslint .`
-   exiting 0 — a block scoped by directory, by filename glob, or by extension, or an
-   `ignores` entry — and asking the resolved config about real files is what detects all
-   of them. Earlier versions linted _synthetic probe paths_ instead, which only ever
-   cover globs someone anticipated; three of those four attacks walked straight past.
+   selectors catch. The lint layer in turn has been disarmed in six demonstrated ways
+   that all left `eslint .` exiting 0 — scoped by directory, by filename glob, or by
+   extension; removed via `ignores`; kept at severity 2 with four _different_ selectors;
+   and switched off by a bare `eslint-disable` comment. Linting the real forms against
+   every file ESLint lints catches the first five, and `noInlineConfig` the sixth. That
+   is a list of what is checked, not a claim that nothing else is possible.
 
    That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`
    only, leaving `scripts/lib/prefix.mjs` — the Feistel sampler — completely unguarded,
