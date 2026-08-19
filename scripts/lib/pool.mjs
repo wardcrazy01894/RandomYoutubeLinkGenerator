@@ -7,9 +7,16 @@
 //   - Fixed SHARD_SIZE means the client computes `shard = floor(i/K), idx = i%K`.
 //     No cumulative-offset array, no binary search, no linearly-growing manifest —
 //     the subtlest bug in revision 1 is deleted rather than tested.
-//   - Records are appended in harvest order, so "everything harvested before date D"
-//     is always a leading PREFIX of the pool. That makes the 7-day safety quarantine
-//     a single integer (`servable`) instead of a per-record scan.
+//   - Records are appended in harvest order, which keeps every shard but the tail
+//     immutable.
+//
+// `servable` is a leftover from an earlier design in which the safety quarantine was a
+// leading prefix of the pool. The quarantine is now an upload-age filter applied at
+// HARVEST time (nothing under 30 days old is ever added), so `servable === total` and the
+// client draws over the whole pool. Keep it that way: the client indexes shard POSITIONS
+// with an index drawn from [0, servable), so any future design that makes servable < total
+// must also guarantee the non-servable records are a contiguous suffix, or the tail of the
+// pool silently becomes undrawable.
 
 import {
   readFileSync,

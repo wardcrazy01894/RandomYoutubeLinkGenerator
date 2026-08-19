@@ -232,8 +232,14 @@ If you do: `npm run revalidate` writes `tombstones.json`. Run it against a check
 `pool` branch, not a plain checkout of `main` — the harvest repopulates `public/data/pool`
 from the branch each night, so tombstones written anywhere else are not where the
 harvester will look. They are no longer _lost_ if you get this wrong: the harvest's reset
-path merges tombstones in both directions. But they will not take effect until they reach
-the branch.
+path merges tombstones in both directions. But the harvester will not see them until they
+reach the branch.
+
+(Committing them straight to `main` instead is a different thing, not a broken version of
+this one: `main` is what the site is built from, so those tombstones take effect on the
+live site at the next deploy without ever touching the branch. That is a legitimate way to
+pull a dead video, and the next promotion merges rather than overwrites, so the branch
+catches up on its own.)
 
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
 copied back and forth:
