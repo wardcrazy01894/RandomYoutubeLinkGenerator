@@ -26,7 +26,7 @@ import { prefixAt, PREFIX_SPACE } from '../scripts/lib/prefix.mjs'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const KEY = 'RandomYoutubeLinkGenerator/v1' // pinned into the child env below
 
-let dir, pool, log
+let dir, pool, log, canaryLog
 
 /** A stand-in for lib/youtube.mjs: deterministic, offline, and instrumented. */
 const STUB = `
@@ -42,7 +42,13 @@ const quotaAt = Number(process.env.STUB_QUOTA_AT ?? 0)
 const perBucket = Number(process.env.STUB_PER_BUCKET ?? 2)
 export async function searchPage(key, q) {
   // The canary runs first and must resolve, or harvest aborts before the loop.
-  if (q === 'my8exz') return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
+  // Logged to its OWN file: the bucket log below cannot distinguish "checked before the
+  // canary" from "checked after it", so a regression that burns the canary's 100 units
+  // before failing shipped green. Anything asserting ordering needs this marker.
+  if (q === 'my8exz') {
+    appendFileSync(process.env.STUB_CANARY_LOG, 'canary\\n')
+    return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
+  }
   calls++
   if (quotaAt && calls === quotaAt) throw new QuotaExceeded('stub quota')
   if (failAll) throw new Error('stub total outage')
@@ -74,6 +80,7 @@ function run(env = {}) {
       // surface as a confusing "counted but never queried" failure.
       HARVEST_KEY: KEY,
       STUB_LOG: log,
+      STUB_CANARY_LOG: canaryLog,
       ...env,
     },
     encoding: 'utf8',
@@ -89,6 +96,8 @@ const manifest = () =>
   JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
 const queried = () =>
   existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []
+/** Whether the canary search actually went out — the 100 units a pre-flight must save. */
+const canaryRan = () => existsSync(canaryLog)
 
 /** The invariant: nothing below the counter may be unqueried. */
 function assertNoGaps(priorCounter, newCounter) {
@@ -138,6 +147,7 @@ beforeEach(() => {
   writeFileSync(join(dir, 'lib', 'youtube.mjs'), STUB)
   pool = join(dir, 'pool')
   log = join(dir, 'queried.log')
+  canaryLog = join(dir, 'canary.log')
   seed()
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -417,7 +427,19 @@ describe('budget floor', () => {
   it('refuses before spending anything on the API', () => {
     seed()
     run({ HARVEST_UNITS: '300' })
-    expect(queried(), 'the check must precede even the canary').toEqual([])
+    // Both assertions matter. The bucket log alone passed even when the check was moved
+    // to AFTER the canary, because the canary is a special-cased early return that never
+    // reached the bucket log — so the test could not see the 100 units being burned.
+    expect(canaryRan(), 'the check must precede even the canary').toBe(false)
+    expect(queried(), 'no bucket may be queried either').toEqual([])
+  })
+
+  it('does run the canary when the budget is usable', () => {
+    seed()
+    run({ HARVEST_UNITS: '500' })
+    expect(canaryRan(), 'otherwise the assertion above proves nothing').toBe(
+      true,
+    )
   })
 
   it('names the minimum that would work', () => {
