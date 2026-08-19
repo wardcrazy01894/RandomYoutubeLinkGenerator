@@ -268,7 +268,7 @@ the right follow-up.
 
 ```bash
 npm run harvest                      # spend the default 9000 units
-HARVEST_UNITS=1000 npm run harvest   # a small run
+HARVEST_UNITS=1000 npm run harvest   # a small run (500 is the minimum that works)
 npm run revalidate                   # sweep for dead/removed videos
 npm run pool-stats                   # regenerate the numbers in RANDOMNESS.md
 node scripts/check-pool.mjs          # structural invariants

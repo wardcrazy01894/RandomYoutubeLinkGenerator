@@ -286,7 +286,8 @@ jobs:
               ``,
               `Triage: docs/OPERATIONS.md — the usual causes are a broken canary`,
               `(YouTube changed ID tokenization), a frozen sampling frontier`,
-              `(no-fresh-progress), an invalid/restricted API key, or a collapsed yield.`,
+              `(no-fresh-progress), an invalid/restricted API key, a collapsed yield,`,
+              `or a dispatched \`units\` below 500 (too small to start a single bucket).`,
             ].join('\n')
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,

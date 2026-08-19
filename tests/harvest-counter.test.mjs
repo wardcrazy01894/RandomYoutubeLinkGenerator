@@ -26,7 +26,7 @@ import { prefixAt, PREFIX_SPACE } from '../scripts/lib/prefix.mjs'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const KEY = 'RandomYoutubeLinkGenerator/v1' // pinned into the child env below
 
-let dir, pool, log
+let dir, pool, log, canaryLog
 
 /** A stand-in for lib/youtube.mjs: deterministic, offline, and instrumented. */
 const STUB = `
@@ -42,7 +42,13 @@ const quotaAt = Number(process.env.STUB_QUOTA_AT ?? 0)
 const perBucket = Number(process.env.STUB_PER_BUCKET ?? 2)
 export async function searchPage(key, q) {
   // The canary runs first and must resolve, or harvest aborts before the loop.
-  if (q === 'my8exz') return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
+  // Logged to its OWN file: the bucket log below cannot distinguish "checked before the
+  // canary" from "checked after it", so a regression that burns the canary's 100 units
+  // before failing shipped green. Anything asserting ordering needs this marker.
+  if (q === 'my8exz') {
+    appendFileSync(process.env.STUB_CANARY_LOG, 'canary\\n')
+    return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
+  }
   calls++
   if (quotaAt && calls === quotaAt) throw new QuotaExceeded('stub quota')
   if (failAll) throw new Error('stub total outage')
@@ -74,6 +80,7 @@ function run(env = {}) {
       // surface as a confusing "counted but never queried" failure.
       HARVEST_KEY: KEY,
       STUB_LOG: log,
+      STUB_CANARY_LOG: canaryLog,
       ...env,
     },
     encoding: 'utf8',
@@ -89,6 +96,8 @@ const manifest = () =>
   JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
 const queried = () =>
   existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []
+/** Whether the canary search actually went out — the 100 units a pre-flight must save. */
+const canaryRan = () => existsSync(canaryLog)
 
 /** The invariant: nothing below the counter may be unqueried. */
 function assertNoGaps(priorCounter, newCounter) {
@@ -138,6 +147,7 @@ beforeEach(() => {
   writeFileSync(join(dir, 'lib', 'youtube.mjs'), STUB)
   pool = join(dir, 'pool')
   log = join(dir, 'queried.log')
+  canaryLog = join(dir, 'canary.log')
   seed()
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -397,5 +407,54 @@ describe('escape hatch cannot be turned into a silencer', () => {
     })
     expect(r.code, r.out).toBe(0)
     expect(manifest().health.status).toBe('ok-quota-capped')
+  })
+})
+
+// A budget below one bucket's worst-case cost produced a run that spent the canary's 100
+// units, harvested nothing, and exited 0 reporting "ok" — observed live at
+// HARVEST_UNITS=300. The plan sizes a bucket at one page (100), but the loop will not
+// START a bucket without MAX_PAGES+1 pages (400) in reserve, so it planned work it could
+// never run. That is the "succeeds while producing nothing" failure this project exists
+// to design against, so it is now fatal and detected before any API call.
+describe('budget floor', () => {
+  it('refuses a budget too small to start a single bucket', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '300' })
+    expect(r.code, 'a run that cannot harvest must not report success').toBe(1)
+    expect(r.out).toMatch(/cannot harvest anything/)
+  })
+
+  it('refuses before spending anything on the API', () => {
+    seed()
+    run({ HARVEST_UNITS: '300' })
+    // Both assertions matter. The bucket log alone passed even when the check was moved
+    // to AFTER the canary, because the canary is a special-cased early return that never
+    // reached the bucket log — so the test could not see the 100 units being burned.
+    expect(canaryRan(), 'the check must precede even the canary').toBe(false)
+    expect(queried(), 'no bucket may be queried either').toEqual([])
+  })
+
+  it('does run the canary when the budget is usable', () => {
+    seed()
+    run({ HARVEST_UNITS: '500' })
+    expect(canaryRan(), 'otherwise the assertion above proves nothing').toBe(
+      true,
+    )
+  })
+
+  it('names the minimum that would work', () => {
+    seed()
+    expect(run({ HARVEST_UNITS: '300' }).out).toMatch(
+      /minimum useful budget is 500/,
+    )
+  })
+
+  it('allows the smallest budget that can actually run a bucket', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '500' })
+    expect(r.code, '500 is exactly canary + one bucket reserve').toBe(0)
+    // The stub does not log the canary, so this counts real buckets. Exactly one fits:
+    // the first search leaves 300, below the 400 reserve, so the loop stops there.
+    expect(queried().length, 'the floor must permit exactly one bucket').toBe(1)
   })
 })
