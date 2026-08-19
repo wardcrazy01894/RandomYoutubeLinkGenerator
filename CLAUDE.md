@@ -32,12 +32,17 @@ nothing crashes and every test passes.
      text.
 
    The two layers cover different failure modes, and neither alone is sufficient. The
-   text scan cannot see alias-form (`const M = Math; M.random()`), which only the lint
-   selectors catch. The lint layer in turn has been disarmed in seven demonstrated ways
+   text scan detects the literal forms AND declaration-form aliasing
+   (`const M = Math`), so it holds even when ESLint is not consulted at all — narrowing
+   `npm run lint` to a subdirectory was a demonstrated bypass. ESLint in turn catches
+   what a text scan cannot reason about, and is the only layer that sees a form the
+   regex is deliberately too narrow to match. The lint layer has been disarmed in eight
+   demonstrated ways
    that all left `eslint .` exiting 0 — scoped by directory, by filename glob, or by
    extension; removed via `ignores`; kept at severity 2 with four _different_ selectors;
-   switched off by a bare `eslint-disable` comment; and by re-enabling inline config for
-   one glob after `noInlineConfig` was set. The probe carries a disable comment and runs
+   switched off by a bare `eslint-disable` comment; by re-enabling inline config for one
+   glob after `noInlineConfig` was set; and by narrowing `npm run lint` itself so CI stops
+   linting a directory. The probe carries a disable comment and runs
    against every file ESLint lints, so all seven surface. That is a list of what is
    checked, not a claim that nothing else is possible.
 

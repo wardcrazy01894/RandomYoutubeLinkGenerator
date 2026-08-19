@@ -16,7 +16,11 @@ import { fileURLToPath } from 'node:url'
 // every file it lints, and separately scans the source as text.
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const SCANNED = ['src', 'scripts']
+// `public` is included: it is ESLint-ignored under public/data, so a source file there
+// would be invisible to the lint layer entirely. NOTE: do not add 'tests' — this file and
+// eslint.config.js both contain a literal `const M = Math` in their prose, so the scan
+// would flag itself.
+const SCANNED = ['src', 'scripts', 'public']
 const EXTENSIONS = [
   '.ts',
   '.tsx',
