@@ -2,6 +2,7 @@ import './style.css'
 import {
   loadManifest,
   loadBlocklist,
+  loadTombstones,
   drawRandom,
   poolAgeDays,
   EmptyPoolError,
@@ -218,7 +219,15 @@ function report(): void {
 // --- boot -------------------------------------------------------------------
 async function boot(): Promise<void> {
   try {
-    ;[manifest, blocked] = await Promise.all([loadManifest(), loadBlocklist()])
+    ;[manifest, blocked] = await Promise.all([
+      loadManifest(),
+      // Blocklist (maintainer removals) and tombstones (sweep findings: gone, private,
+      // or no longer embeddable) are both permanent exclusions, so they merge into one
+      // set. Tombstones were previously published and never read.
+      Promise.all([loadBlocklist(), loadTombstones()]).then((lists) =>
+        lists.flat(),
+      ),
+    ])
   } catch {
     els.subhead.textContent = 'The pool could not be loaded.'
     showBanner(

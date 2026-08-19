@@ -69,6 +69,10 @@ try {
       else if (m.privacyStatus !== 'public')
         dead.push({ id: r.id, why: 'not-public' })
       else if (!m.embeddable) dead.push({ id: r.id, why: 'not-embeddable' })
+      // The header claimed age-restriction was caught here; it never was. A video can
+      // become age-restricted long after upload, which is exactly the drift this sweep
+      // exists to catch.
+      else if (m.ageRestricted) dead.push({ id: r.id, why: 'age-restricted' })
     }
     checked += batch.length
   }

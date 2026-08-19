@@ -51,6 +51,23 @@ export async function loadManifest(): Promise<Manifest> {
   return res.json()
 }
 
+/**
+ * IDs the weekly sweep found gone, made private, or no longer embeddable.
+ *
+ * This was written by `scripts/revalidate.mjs` and deployed, but never fetched — so the
+ * sweep that docs/DESIGN.md §5.3 calls the primary safety mechanism produced output no
+ * viewer ever saw, and videos YouTube had already removed kept being served.
+ */
+export async function loadTombstones(): Promise<string[]> {
+  try {
+    const res = await fetch(`${base}/tombstones.json`, { cache: 'no-cache' })
+    if (!res.ok) return []
+    return (await res.json()).ids ?? []
+  } catch {
+    return []
+  }
+}
+
 export async function loadBlocklist(): Promise<string[]> {
   try {
     const res = await fetch(`${base}/blocklist.json`, { cache: 'no-cache' })

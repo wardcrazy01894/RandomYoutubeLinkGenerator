@@ -73,8 +73,9 @@ Ordered by how much they should worry you.
    consistently since 2005. That is folklore, not a published fact. If the scheme changed,
    dash position could correlate with upload era — and era correlates with almost
    everything. We monitor the character distribution by upload year to detect it.
-4. **Embeddability.** We serve only embeddable videos, which excludes most major-label
-   music and many news organisations. Currently ~99% of harvested videos qualify, so the
+4. **Embeddability.** By default we serve only embeddable videos, which excludes most
+   major-label music and many news organisations. The footer toggle lifts this along with
+   age-restriction, so it is a default rather than a hard frame boundary. Currently ~99% of harvested videos qualify, so the
    effect is small but real.
 5. **Unexhaustible buckets (~17%).** When a prefix happens to look like ordinary text
    (`ilfat`), it collides with thousands of title matches and the bucket cannot be

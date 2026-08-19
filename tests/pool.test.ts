@@ -142,6 +142,32 @@ describe('drawRandom', () => {
   })
 })
 
+describe('tombstones', () => {
+  // The weekly sweep writes tombstones.json, and it was deployed but never fetched — so
+  // videos YouTube had removed kept being drawn while three comments claimed the client
+  // filtered them. These pin that the exclusion set is honoured however it is composed.
+  it('never draws a tombstoned id', async () => {
+    mockShards()
+    const excluded = new Set(['0-0', '0-1', '0-2', '0-3', '0-4'])
+    for (let i = 0; i < 200; i++) {
+      const r = await drawRandom(manifest(10, 10), { safeMode: true, excluded })
+      expect(excluded.has(r.id)).toBe(false)
+    }
+  })
+
+  it('applies exclusions even with safe mode off', async () => {
+    mockShards()
+    const excluded = new Set(['0-0', '0-1', '0-2', '0-3', '0-4'])
+    for (let i = 0; i < 200; i++) {
+      const r = await drawRandom(manifest(10, 10), {
+        safeMode: false,
+        excluded,
+      })
+      expect(excluded.has(r.id)).toBe(false)
+    }
+  })
+})
+
 describe('poolAgeDays', () => {
   it('returns null when the pool has never been generated', () => {
     expect(poolAgeDays({ ...manifest(0), generatedAt: null })).toBeNull()

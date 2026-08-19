@@ -166,7 +166,7 @@ lifetime. The window length is published.
 1. **Search-index coverage.** Unlisted, private, and deleted videos are absent — correct,
    they are not public. Videos demoted or excluded by search are under-represented by an
    unknown amount. Partly this is safety filtering we _want_.
-2. **Embeddability.** We serve only embeddable videos, excluding most major-label music
+2. **Embeddability.** By default we serve only embeddable videos, excluding most major-label music
    and many news orgs. Measured from `status.embeddable` and published as a percentage.
 3. **Age-restriction / safety subsetting.** Default view excludes age-restricted videos
    (§6). Opt-out is available and clearly labelled.
