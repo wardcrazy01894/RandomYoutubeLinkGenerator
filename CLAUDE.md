@@ -17,13 +17,21 @@ nothing crashes and every test passes.
 3. **Never use `Math.random`.** `src/random.ts` (CSPRNG + rejection sampling) is the only
    source of randomness in the client; scripts use `randomInt()` from `node:crypto`.
 
-   Two independent layers enforce this, and each has a committed self-check that fails
-   if the other is disabled, narrowed, or scoped away:
+   Two independent layers enforce this, and each has a committed self-check:
    - `eslint.config.js` — `no-restricted-syntax` selectors covering `Math.random`,
-     `Math['random']`, `globalThis.Math.random`, and aliasing/destructuring of `Math`.
-     The block has **no `files` key on purpose**: it must apply to every linted file.
-   - `tests/no-math-random.test.mjs` — scans `src/` and `scripts/` as text, so it still
-     holds if the lint config is narrowed, misscoped, or stops matching.
+     `Math['random']`, `globalThis.Math.random`, and declaration-form aliasing or
+     destructuring of `Math`. The block has **no `files` key on purpose**: it must
+     apply to every linted file, and no later block may redefine that rule (flat config
+     is later-wins per rule, so doing so deletes these selectors for whatever it
+     matches).
+   - `tests/no-math-random.test.mjs` — two checks. It scans `src/` and `scripts/` as
+     text, which holds even if the lint config stops matching; and it drives ESLint's
+     API over probe paths **derived from the scanned tree**, so a block scoped to any
+     directory containing source — including a new one — is detected.
+
+   The text scan cannot see alias-form (`const M = Math; M.random()`), and the lint layer
+   can be scoped away, so neither alone is sufficient. Together they cover both: the
+   derived probes are what make the "scoped away" case detectable.
 
    That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`
    only, leaving `scripts/lib/prefix.mjs` — the Feistel sampler — completely unguarded,

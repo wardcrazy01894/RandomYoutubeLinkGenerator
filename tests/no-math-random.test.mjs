@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Defence in depth for the project's central claim.
@@ -19,7 +19,7 @@ const SCANNED = ['src', 'scripts']
 const EXTENSIONS = ['.ts', '.mjs', '.js']
 
 /** Math.random, Math['random'], Math [ "random" ] — with arbitrary whitespace. */
-const FORBIDDEN = /Math\s*(?:\??\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
+const FORBIDDEN = /Math\s*(?:\??\s*\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
 
 function walk(dir) {
   const out = []
@@ -63,8 +63,9 @@ describe('Math.random is absent from the randomness-critical source', () => {
     expect(offenders).toEqual([])
   })
 
-  // Makes CLAUDE.md's claim that BOTH layers are mutation-verified literally true: the
-  // lint selectors are config, and a typo in any of them would otherwise fail nothing.
+  // The lint layer is config, so a typo in any selector — or a later block redefining
+  // the rule for some path — would otherwise fail nothing in CI. This is what makes
+  // CLAUDE.md's claim about scoping hold.
   it('has lint selectors that actually fire, in every guarded tree', async () => {
     const { ESLint } = await import('eslint')
     const linter = new ESLint({ cwd: ROOT })
@@ -75,11 +76,17 @@ describe('Math.random is absent from the randomness-critical source', () => {
       'const MM = Math\nexport const dd = MM.random()',
       'const { random } = Math\nexport const ee = random()',
     ]
-    // Probe each guarded tree, not just the repo root. Flat config is later-wins per
-    // rule, so a `no-restricted-syntax` block scoped to src/**/*.ts silently deletes
-    // these selectors THERE while a root-only probe stays green — which is exactly how
-    // this guard died the first time.
-    const probes = ['src/__probe.ts', 'scripts/__probe.mjs', '__probe.mjs']
+    // Probes are DERIVED from the scanned tree, not hardcoded. Flat config is
+    // later-wins per rule, so a block scoped to any subdirectory silently deletes these
+    // selectors there — and a fixed probe list only covers the directories someone
+    // happened to think of. Hardcoding src/ and scripts/ missed scripts/lib/, which is
+    // where the Feistel sampler lives: a block scoped to `scripts/lib/**` disarmed the
+    // guard for the sampler while every test stayed green.
+    const probeDirs = [ROOT, ...new Set(files.map((f) => dirname(f)))]
+    const probes = probeDirs.flatMap((d) => [
+      join(d, '__probe.ts'),
+      join(d, '__probe.mjs'),
+    ])
 
     // Assert on the RULE, not errorCount: an unrelated rule firing would otherwise make
     // a completely dead guard look alive, and an unrelated rule on the clean sample
