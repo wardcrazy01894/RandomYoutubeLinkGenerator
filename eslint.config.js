@@ -6,28 +6,73 @@ export default tseslint.config(
   { ignores: ['dist', 'node_modules', 'public/data'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  // ---------------------------------------------------------------------------
+  // The Math.random ban. This project's entire product is an unbiased draw, so an
+  // accidental Math.random is a P0 correctness bug, not a style issue.
+  //
+  // No `files` key: this applies to EVERY linted file. It previously sat inside the
+  // src/**/*.ts block, which left scripts/lib/prefix.mjs — the Feistel sampler — and
+  // every other script completely unguarded.
+  //
+  // The companion `no-restricted-globals: [{ name: 'Math.random' }]` that used to live
+  // here was DEAD CONFIG: that rule matches bare global identifiers, and there is no
+  // global named "Math.random", so it never fired once. It is removed rather than left
+  // as decoration, because a guard that looks like a second layer is worse than an
+  // honest single one.
+  {
+    // DO NOT set `no-restricted-syntax` in any later config block. Flat config is
+    // later-wins PER RULE, so a block further down that defines this rule silently
+    // deletes every selector below for the files it matches — which is precisely how
+    // this guard came to cover only src/**/*.ts. Extend this array instead.
+    // Inline comments cannot switch this off. Without it, a single
+    // `/* eslint-disable no-restricted-syntax */` at the top of a new file disarms the
+    // guard with no config change at all — and for any file outside src/, scripts/ and
+    // public/ the text-scan layer does not run, so nothing would catch it. (Inside those
+    // trees the text scan does detect declaration-form aliasing independently; do not
+    // read this comment as a reason to delete that.) The repo uses no disable comments;
+    // if one ever
+    // becomes genuinely necessary, it has to be argued for here rather than added
+    // silently in a source file.
+    linterOptions: { noInlineConfig: true },
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Math.random()
+          selector:
+            "MemberExpression[object.name='Math'][property.name='random']",
+          message:
+            'Math.random is not a CSPRNG. Use randomBelow() from src/random.ts, or randomInt() from node:crypto in scripts.',
+        },
+        {
+          // Math['random']() — computed access sidesteps a property.name selector.
+          selector:
+            "MemberExpression[computed=true][object.name='Math'][property.value='random']",
+          message:
+            'Math.random is not a CSPRNG. Use randomBelow() from src/random.ts, or randomInt() from node:crypto in scripts.',
+        },
+        {
+          // globalThis.Math.random / window.Math.random
+          selector:
+            "MemberExpression[object.property.name='Math'][property.name='random']",
+          message:
+            'Math.random is not a CSPRNG. Use randomBelow() from src/random.ts, or randomInt() from node:crypto in scripts.',
+        },
+        {
+          // const M = Math  /  const { random } = Math — declaration-form aliasing or
+          // destructuring escapes every member-expression selector above. Assignment
+          // form (`let M; M = Math`) is not covered: that is evasion, not accident.
+          selector: "VariableDeclarator[init.name='Math']",
+          message:
+            'Do not alias or destructure Math — it defeats the Math.random ban. Reference Math members directly.',
+        },
+      ],
+    },
+  },
   {
     files: ['src/**/*.ts'],
     languageOptions: { globals: globals.browser },
     rules: {
-      // The randomness of this project is its entire product. Math.random is not a
-      // CSPRNG and is never acceptable here — src/random.ts is the only source.
-      'no-restricted-globals': [
-        'error',
-        {
-          name: 'Math.random',
-          message: 'Use randomBelow() from src/random.ts.',
-        },
-      ],
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector:
-            "MemberExpression[object.name='Math'][property.name='random']",
-          message:
-            'Math.random is not a CSPRNG — use randomBelow() from src/random.ts.',
-        },
-      ],
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },

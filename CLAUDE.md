@@ -15,7 +15,44 @@ nothing crashes and every test passes.
    whole. A truncated bucket is truncated in _relevance_ order, so what survives skews
    popular — the exact bias this method exists to defeat.
 3. **Never use `Math.random`.** `src/random.ts` (CSPRNG + rejection sampling) is the only
-   source of randomness. ESLint enforces this.
+   source of randomness in the client; scripts use `randomInt()` from `node:crypto`.
+
+   Two independent layers enforce this, and each has a committed self-check:
+   - `eslint.config.js` — `no-restricted-syntax` selectors covering `Math.random`,
+     `Math['random']`, `globalThis.Math.random`, and declaration-form aliasing or
+     destructuring of `Math`. The block has **no `files` key on purpose**: it must
+     apply to every linted file, and no later block may redefine that rule (flat config
+     is later-wins per rule, so doing so deletes these selectors for whatever it
+     matches).
+   - `tests/no-math-random.test.mjs` — it lints every accidental form against **every
+     file ESLint actually lints**, requiring each to be rejected at severity 2. It checks
+     behaviour, not config shape: severity plus a selector COUNT was satisfied by four
+     entirely unrelated selectors while `Math.random()` ran free in `src/random.ts`. It
+     also asserts no source file has been ignored out of linting, and scans the source as
+     text.
+
+   The two layers cover different failure modes, and neither alone is sufficient. The
+   text scan detects the literal forms AND declaration-form aliasing
+   (`const M = Math`), so it holds even when ESLint is not consulted at all — narrowing
+   `npm run lint` to a subdirectory was a demonstrated bypass. ESLint in turn catches
+   what a text scan cannot reason about, and is the only layer that sees a form the
+   regex is deliberately too narrow to match. The lint layer has been disarmed in eight
+   demonstrated ways
+   that all left `eslint .` exiting 0 — scoped by directory, by filename glob, or by
+   extension; removed via `ignores`; kept at severity 2 with four _different_ selectors;
+   switched off by a bare `eslint-disable` comment; by re-enabling inline config for one
+   glob after `noInlineConfig` was set; and by narrowing `npm run lint` itself so CI stops
+   linting a directory. The probe carries a disable comment and runs
+   against every file ESLint lints, so the first seven surface there; the eighth is why
+   the text scan detects aliasing itself rather than deferring to ESLint. That is a list of what is
+   checked, not a claim that nothing else is possible.
+
+   That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`
+   only, leaving `scripts/lib/prefix.mjs` — the Feistel sampler — completely unguarded,
+   and it carried a `no-restricted-globals: [{ name: 'Math.random' }]` entry that was
+   **dead config** and never fired once. Do not re-add a rule here without proving it
+   fires.
+
 4. **Never reject-and-advance.** When a draw lands on an excluded video, redraw. Advancing
    to `i+1` hands that video's probability mass to its neighbour.
 5. **Never authenticate the harvester.** API key only — no OAuth, no cookies, no session.
