@@ -35,7 +35,9 @@ import { loadKey } from './lib/env.mjs'
  * HARVEST_PACING_MS=0 the tests set.
  */
 const envNum = (raw, fallback) => {
-  if (raw === undefined || raw === '') return fallback
+  // Trimmed: Number(' ') is 0, so a whitespace-only value would otherwise read as an
+  // explicit zero rather than "unset".
+  if (raw === undefined || raw.trim() === '') return fallback
   const n = Number(raw)
   return Number.isFinite(n) ? n : fallback
 }
@@ -95,6 +97,7 @@ let reharvestAttempted = 0
 // later success in this run must not be counted, or the failed prefix is skipped for good
 // while a later one gets queried twice.
 let freshHole = false
+let freshNew = 0
 
 // --- canary -----------------------------------------------------------------
 // Deliberately uninitialised: every path through the catch below either exits the
@@ -186,7 +189,14 @@ for (const { n, fresh } of plan) {
       unexhausted++
       continue
     } // never take a partial bucket (§3.3.3)
-    for (const id of ids) if (!existingIds.has(id)) found.set(id, q)
+    for (const id of ids) {
+      if (existingIds.has(id) || found.has(id)) continue
+      found.set(id, q)
+      // Counted separately: the baseline and the gate must measure FRESH buckets only.
+      // Mixing in re-harvest buckets — which legitimately return nothing new — diluted
+      // the number being compared against a fresh-derived threshold.
+      if (fresh) freshNew++
+    }
   } catch (err) {
     if (err instanceof QuotaExceeded) {
       quotaHit = true
@@ -218,6 +228,9 @@ async function harvestBucket(q) {
 }
 
 const yieldPer = bucketsDone > 0 ? found.size / bucketsDone : 0
+// What the baseline tracks and the gate compares: new videos per FRESH bucket. null when
+// no fresh bucket completed — a distinct condition from "zero yield", alarmed separately.
+const freshYield = freshAttempted > 0 ? freshNew / freshAttempted : null
 console.log(
   `harvested ${bucketsDone} buckets -> ${found.size} new IDs (${yieldPer.toFixed(2)}/bucket)`,
 )
@@ -259,19 +272,33 @@ if (found.size > 0 && remaining() > 0) {
 const baseline = BASELINE_RESET
   ? null
   : (manifest.health?.baselineYield ?? null)
-// Gate on FRESH buckets, not all of them. A truncated run is mostly re-harvest buckets
-// that legitimately return nothing new, so measuring it against the baseline generated a
-// routine false alarm — and the naive fix (skip the gate when truncated) would instead go
-// silent exactly when every fresh bucket failed.
+// No fresh bucket completed at all, though the run planned some and had budget to run
+// them. This is NOT a low yield — there is no measurement — so the yield gate below
+// cannot see it, and gating on freshAttempted made that case permanently silent: counter
+// frozen, nothing published, "ok" reported every night. Excludes the quota-capped and
+// no-budget endings, which are normal.
+if (freshCount > 0 && freshAttempted === 0 && !quotaHit && bucketsDone > 0) {
+  console.error(
+    `FATAL: ${bucketsDone} buckets ran but not one of the ${freshCount} planned fresh ` +
+      `buckets completed. The sampling frontier is not advancing.`,
+  )
+  recordHealth('no-fresh-progress', bucketsDone, null, runShape())
+  process.exit(1)
+}
+
+// Gate on the FRESH yield. Comparing a fresh-derived baseline against a mixed
+// fresh+re-harvest number made a healthy truncated run look collapsed right at the
+// threshold, and a fully-failed fresh plan look fine.
 if (
   baseline &&
   freshAttempted >= 20 &&
-  yieldPer < baseline * YIELD_FLOOR_RATIO
+  freshYield !== null &&
+  freshYield < baseline * YIELD_FLOOR_RATIO
 ) {
   console.error(
-    `FATAL: yield ${yieldPer.toFixed(2)}/bucket is below half the ${baseline.toFixed(2)} baseline.`,
+    `FATAL: fresh yield ${freshYield.toFixed(2)}/bucket is below half the ${baseline.toFixed(2)} baseline.`,
   )
-  recordHealth('yield-collapsed', bucketsDone, yieldPer, runShape())
+  recordHealth('yield-collapsed', bucketsDone, freshYield, runShape())
   process.exit(1)
 }
 
@@ -315,7 +342,7 @@ manifest.stats = {
 recordHealth(
   quotaHit ? 'ok-quota-capped' : 'ok',
   bucketsDone,
-  yieldPer,
+  freshYield,
   runShape(),
 )
 
@@ -332,6 +359,9 @@ function runShape() {
     freshAttempted,
     reharvestAttempted,
     truncated: freshHole,
+    // Overall yield across fresh AND re-harvest buckets, for diagnosis only. The
+    // baseline deliberately tracks the fresh-only number.
+    yieldAll: yieldPer,
   }
 }
 

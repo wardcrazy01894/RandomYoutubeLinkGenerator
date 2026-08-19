@@ -220,11 +220,12 @@ describe('baseline escape hatch and truncation', () => {
         totalBuckets: 400,
       }),
     )
-    // Yield must CLEAR the gate (3 > 4/2) so this is a truncated-but-healthy run — the
-    // case that would otherwise walk the baseline down while reporting 'ok'.
+    // FAIL_AT 5 leaves four fresh buckets completed, so this is truncated-but-HEALTHY
+    // rather than a total fresh-plan failure (which has its own alarm). Yield clears the
+    // gate, so this is the case that would otherwise walk the baseline down under 'ok'.
     const r = run({
       HARVEST_UNITS: '9000',
-      STUB_FAIL_AT: '1',
+      STUB_FAIL_AT: '5',
       STUB_PER_BUCKET: '3',
     })
     expect(r.code, r.out).toBe(0)
@@ -306,7 +307,11 @@ describe('escape hatch cannot be turned into a silencer', () => {
 
   // The gate measures FRESH buckets: a truncated run is mostly re-harvest buckets that
   // legitimately return little, so measuring it against the baseline false-alarms.
-  it('does not fire the yield gate on a run with almost no fresh buckets', () => {
+  // Gating on freshAttempted made a TOTAL fresh-plan failure silent: freshAttempted 0 is
+  // below the threshold, so the gate was skipped and the run reported ok — counter
+  // frozen, nothing published, every night identical. That case has no yield to measure,
+  // so it gets its own alarm rather than falling through the yield gate.
+  it('alarms when not one fresh bucket completes', () => {
     seed({ baselineYield: 5 })
     writeFileSync(
       join(pool, 'state.json'),
@@ -320,12 +325,22 @@ describe('escape hatch cannot be turned into a silencer', () => {
     const r = run({
       HARVEST_UNITS: '9000',
       STUB_FAIL_AT: '1',
-      STUB_PER_BUCKET: '0',
+      STUB_PER_BUCKET: '3',
     })
-    expect(
-      r.code,
-      'a truncated run must not be judged against the full baseline',
-    ).toBe(0)
-    expect(manifest().health.truncated).toBe(true)
+    expect(r.code, 'a frozen sampling frontier must never report ok').toBe(1)
+    expect(manifest().health.status).toBe('no-fresh-progress')
+    expect(r.out).toMatch(/frontier is not advancing/i)
+  })
+
+  // The quota-capped ending is a normal one, not a fault: it must not trip that alarm.
+  it('does not alarm when the run simply ran out of quota', () => {
+    seed({ baselineYield: 5 })
+    const r = run({
+      HARVEST_UNITS: '9000',
+      STUB_QUOTA_AT: '1',
+      STUB_PER_BUCKET: '3',
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(manifest().health.status).toBe('ok-quota-capped')
   })
 })
