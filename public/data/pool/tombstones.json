@@ -1,1 +1,1 @@
-{"ids": [], "note": "Video IDs found dead or non-embeddable by the revalidation sweep. Shards are immutable, so removals are recorded here rather than edited out."}
+{"ids":[],"note":"Video IDs the re-validation sweep found deleted or made private. Only permanent states are recorded here: embeddability and age-restriction are governed by the safe-mode toggle, so tombstoning them would convert a filter the viewer can lift into a removal they cannot. Shards are immutable, so removals live here rather than being edited out."}

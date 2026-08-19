@@ -68,6 +68,16 @@ jobs:
             || { echo "could not read blocklist.json from main"; exit 1; }
           mv /tmp/blocklist.json public/data/pool/blocklist.json
 
+          # Same argument for tombstones, which are also a removal record — except these
+          # accumulate on BOTH sides, so union rather than overwrite. main keeps the note
+          # text; the branch contributes whatever its sweeps found.
+          git show HEAD:public/data/pool/tombstones.json > /tmp/main-tombstones.json \
+            || { echo "could not read tombstones.json from main"; exit 1; }
+          node scripts/merge-tombstones.mjs \
+            --base /tmp/main-tombstones.json \
+            --add public/data/pool/tombstones.json \
+            --out public/data/pool/tombstones.json
+
           AFTER=$(node -e "console.log(require('./public/data/pool/manifest.json').total)")
           TOMB=$(node -e "console.log(require('./public/data/pool/tombstones.json').ids.length)")
 

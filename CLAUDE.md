@@ -88,8 +88,18 @@ Keep these current in the same PR as the change:
   `build / typecheck / lint`, `test`, `secret scan`, `pool integrity`
 - `main` is the **source of truth**: the site is built from main's committed
   `public/data/pool`. The `pool` branch is an unprotected staging area the nightly
-  harvest appends to; nothing there reaches viewers until `promote-pool.yml` opens a PR
-  and it merges. Never restore the build-time overlay — it made main decorative.
+  harvest appends to; nothing there reaches viewers until a promotion PR merges. Never
+  restore the build-time overlay — it made main decorative, and it meant the live site
+  served data no one had reviewed.
+- `promote-pool.yml` pushes the `promote/pool` branch but deliberately does **not** open
+  the PR. A `GITHUB_TOKEN`-created PR fires no `pull_request` event, so required checks
+  never report and it can never merge. That rule keys on the token, not on how the
+  workflow was triggered, so dispatching it by hand does not change it — open the PR from
+  a real account.
+- **Tombstones and the blocklist are removal records: merge them, never overwrite.**
+  Every path that copies a pool between `main` and `pool` goes through
+  `scripts/merge-tombstones.mjs`. A plain copy silently resurrected videos the sweep had
+  already found deleted.
 
 ## Every PR gets an adversarial review
 

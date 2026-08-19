@@ -41,7 +41,9 @@ promote a pool that has _shrunk_, since the pool is append-only. `blocklist.json
 from `main`, never the branch, so a promotion cannot resurrect an id removed here.
 
 Re-dispatching force-pushes `promote/pool`, which updates an already-open PR rather than
-leaving a second one behind.
+leaving a second one behind. The flip side: anything committed to that branch by hand
+(say a fix to one bad record while the PR is in review) is discarded by the next
+dispatch. Make such fixes on `main` after the promotion merges, not on the branch.
 
 Merging it triggers `deploy.yml`, and the site serves the new pool.
 
@@ -58,14 +60,33 @@ Its git history is never discarded — the push is always a fast-forward.
   night and fast-forwards; it is not force-pushed, so every run is a reviewable
   commit you can diff or revert.
 
-The `pool` branch keeps a real commit per harvest (`harvest: pool at N videos`), so you
-can diff any two nights and `git revert` a bad run. To roll the served pool back, reset
-the branch to a known-good commit — the next deploy picks it up:
+### Rolling back what viewers see
+
+**Resetting the `pool` branch does not roll back the live site.** It used to, when the
+deploy overlaid the branch at build time. It no longer does: the site is built from the
+pool committed on `main`, so a force-push to `pool` changes nothing a viewer sees, and the
+deploy will appear to succeed while serving exactly what it served before. During an
+incident that is the worst possible failure — it looks like it worked.
+
+To pull something from the live site, change `main`:
+
+```bash
+# Fastest for one bad video — the client filters blocklisted ids on load.
+gh pr create ...   # add the id to public/data/pool/blocklist.json on main
+```
+
+To roll back a whole promotion, revert its merge commit on `main` via a PR. Merging
+either one triggers `deploy.yml`, and that is what actually changes the site.
+
+Resetting `pool` is still the right move for a bad _harvest_ — it stops the bad data ever
+reaching a promotion. It just is not a rollback of anything already merged:
 
 ```bash
 git push --force origin <good-sha>:pool
-gh workflow run deploy.yml --repo wardcrazy01894/RandomYoutubeLinkGenerator
 ```
+
+The branch keeps a real commit per harvest (`harvest: pool at N videos`), so you can diff
+any two nights and `git revert` a bad run.
 
 `pool` exists because a `GITHUB_TOKEN`-created pull request does **not** fire
 `pull_request` events. A nightly PR would therefore never get its required checks

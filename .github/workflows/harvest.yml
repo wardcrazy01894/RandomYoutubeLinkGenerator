@@ -92,8 +92,18 @@ jobs:
               # files but leaves behind any shard the BRANCH had and main does not, so a
               # plain checkout produced a hybrid tree that check-pool.mjs then rejected —
               # after the night's quota was already spent.
+              # Tombstones are the one thing the branch can hold that main does not:
+              # a sweep running AFTER a promotion writes them with no change to total,
+              # so this reset is reached with them still branch-only. Copying main over
+              # them dropped them silently, and the next promotion put those deleted
+              # videos back in front of viewers. Carry them across.
+              cp public/data/pool/tombstones.json /tmp/branch-tombstones.json
               rm -rf public/data/pool
               git checkout HEAD -- public/data/pool
+              node scripts/merge-tombstones.mjs \
+                --base public/data/pool/tombstones.json \
+                --add /tmp/branch-tombstones.json \
+                --out public/data/pool/tombstones.json
               # NOTE: .pool-branch is deliberately NOT deleted. Removing it sent Publish
               # down its `git init` path, which builds an orphan history unrelated to
               # origin/pool, and the push (correctly, deliberately not --force) was then
