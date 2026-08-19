@@ -103,6 +103,29 @@ harvest workflows overwrite the branch's copy with main's after restoring the po
 entry added here propagates on the next deploy and is then carried onto the `pool` branch.
 The site filters blocklisted IDs at draw time.
 
+## Running the re-validation sweep (read this first)
+
+`npm run revalidate` writes `tombstones.json`, and unlike `blocklist.json` that file is
+**not** restored from `main`. Both workflows `rm -rf public/data/pool` and repopulate from
+the `pool` branch, so a sweep run against a plain checkout of `main` writes tombstones
+that are silently discarded on the next harvest or deploy.
+
+Run it against the live pool instead:
+
+```bash
+git clone --branch pool --single-branch \
+  git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git pool-data
+cp -R pool-data/. public/data/pool/ && rm -rf public/data/pool/.git
+npm run revalidate
+cd pool-data && cp -R ../public/data/pool/. . && git add -A \
+  && git commit -m "revalidate: prune dead videos" && git push
+```
+
+The split is deliberate: `blocklist.json` is human-curated and lives on `main` so removals
+go through review, while `tombstones.json` is machine-generated sweep output and belongs
+with the pool data. Automating the sweep as a workflow would remove this footgun and is
+the right follow-up.
+
 ## Manual operations
 
 ```bash

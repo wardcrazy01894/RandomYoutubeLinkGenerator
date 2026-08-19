@@ -118,6 +118,11 @@ const found = new Map()
 const priorCounter = state.counter
 let freshAttempted = 0
 let reharvestAttempted = 0
+// The fresh counter may only advance over a CONTIGUOUS run of queried prefixes, because
+// state.counter is a single integer resume point. Once one fresh bucket fails, every
+// later success in this run must not be counted, or the failed prefix is skipped for
+// good while a later one gets queried twice.
+let freshHole = false
 let bucketsDone = 0
 let unexhausted = 0
 let quotaHit = false
@@ -134,8 +139,13 @@ for (const { n, fresh } of plan) {
     // just under the daily quota, a QuotaExceeded throw is the NORMAL way a run ends.
     // An unexhausted bucket still counts: it was queried and deliberately rejected,
     // so retrying it forever would stall the counter behind one bad prefix.
-    if (fresh) freshAttempted++
-    else reharvestAttempted++
+    if (fresh) {
+      if (!freshHole) freshAttempted++
+    } else {
+      // The re-harvest cursor tolerates holes: a skipped bucket simply comes back one
+      // rotation later, so it needs no contiguity rule.
+      reharvestAttempted++
+    }
     if (!exhausted) {
       unexhausted++
       continue
@@ -150,6 +160,10 @@ for (const { n, fresh } of plan) {
       console.error(`FATAL: ${err.message}`)
       process.exit(1)
     }
+    // A generic failure (persistent 5xx, network) does not stop the run, but it does
+    // punch a hole in the fresh sequence — so freeze the fresh counter here. The cost is
+    // re-querying a few prefixes next run; the alternative is losing one permanently.
+    if (fresh) freshHole = true
     console.warn(`bucket ${q} failed: ${err.message}`)
   }
 }
@@ -225,7 +239,8 @@ const servable = total
 // early on budget exhaustion or quotaExceeded, and `affordable` assumes one page per
 // bucket while a bucket may cost up to MAX_PAGES. Advancing by the plan permanently
 // burned prefixes that were never sampled, silently shrinking the frame (P0 per
-// CLAUDE.md) — 15 of the first 38 were lost this way.
+// CLAUDE.md). Only a contiguous run of successfully queried fresh buckets counts; see
+// freshHole above.
 state.counter = Math.min(state.counter + freshAttempted, PREFIX_SPACE)
 // Same correction for the re-harvest cursor. The plan's fresh entries all precede the
 // re-harvest ones, so a break during the fresh section runs ZERO re-harvest buckets while

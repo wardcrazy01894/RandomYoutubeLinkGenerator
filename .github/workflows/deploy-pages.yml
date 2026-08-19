@@ -44,8 +44,11 @@ jobs:
             test -f public/data/pool/manifest.json \
               || { echo "Overlay produced no manifest.json — refusing to deploy"; exit 1; }
             # main stays authoritative for the human-curated safety blocklist.
+            # Not an AND-list: set -e is exempt inside one, so mid-script a failure
+            # here would stop blocklist propagation with no signal at all.
             git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
-              && mv /tmp/blocklist.json public/data/pool/blocklist.json
+              || { echo "Could not read blocklist.json from main — refusing to deploy"; exit 1; }
+            mv /tmp/blocklist.json public/data/pool/blocklist.json
             echo "Using pool branch: $(ls public/data/pool | wc -l) files"
           elif [ "$rc" -eq 2 ]; then
             echo "No pool branch yet — using the seed pool committed to main."
