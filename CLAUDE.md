@@ -33,12 +33,13 @@ nothing crashes and every test passes.
 
    The two layers cover different failure modes, and neither alone is sufficient. The
    text scan cannot see alias-form (`const M = Math; M.random()`), which only the lint
-   selectors catch. The lint layer in turn has been disarmed in six demonstrated ways
+   selectors catch. The lint layer in turn has been disarmed in seven demonstrated ways
    that all left `eslint .` exiting 0 — scoped by directory, by filename glob, or by
    extension; removed via `ignores`; kept at severity 2 with four _different_ selectors;
-   and switched off by a bare `eslint-disable` comment. Linting the real forms against
-   every file ESLint lints catches the first five, and `noInlineConfig` the sixth. That
-   is a list of what is checked, not a claim that nothing else is possible.
+   switched off by a bare `eslint-disable` comment; and by re-enabling inline config for
+   one glob after `noInlineConfig` was set. The probe carries a disable comment and runs
+   against every file ESLint lints, so all seven surface. That is a list of what is
+   checked, not a claim that nothing else is possible.
 
    That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`
    only, leaving `scripts/lib/prefix.mjs` — the Feistel sampler — completely unguarded,

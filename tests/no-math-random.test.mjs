@@ -17,13 +17,27 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SCANNED = ['src', 'scripts']
-const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.js']
+const EXTENSIONS = [
+  '.ts',
+  '.tsx',
+  '.jsx',
+  '.mts',
+  '.cts',
+  '.mjs',
+  '.cjs',
+  '.js',
+]
 
 /** Math.random, Math?.random, Math['random'] — with arbitrary whitespace. */
 const FORBIDDEN = /Math\s*(?:\??\s*\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
 
 // Every accidental form, in one snippet. Each line must draw its own complaint.
 const OFFENDING = [
+  // Prepended deliberately: if a later block re-enables inline config for some glob,
+  // this comment silences the rule there and the file reports zero hits. A separate
+  // test pinned to one path could not see that — the same hardcoded-probe blind spot
+  // this file exists to avoid.
+  '/* eslint-disable no-restricted-syntax */',
   'export const aa = Math.random()',
   "export const bb = Math['random']()",
   'export const cc = globalThis.Math.random()',
@@ -31,9 +45,12 @@ const OFFENDING = [
   'const { random } = Math',
 ].join('\n')
 
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', 'public'])
+
 function walk(dir) {
   const out = []
   for (const entry of readdirSync(dir)) {
+    if (entry.startsWith('.') || SKIP_DIRS.has(entry)) continue
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) out.push(...walk(full))
     else if (EXTENSIONS.some((e) => entry.endsWith(e))) out.push(full)
@@ -42,6 +59,9 @@ function walk(dir) {
 }
 
 const sourceFiles = SCANNED.flatMap((d) => walk(join(ROOT, d)))
+// Everything in the repo ESLint ought to be linting, so a NEW top-level directory is
+// covered without anyone remembering to extend a list.
+const repoFiles = walk(ROOT)
 const rel = (f) => f.slice(ROOT.length)
 
 describe('Math.random is absent from the randomness-critical source', () => {
@@ -72,7 +92,7 @@ describe('Math.random is absent from the randomness-critical source', () => {
 
     // A source file missing from ESLint's own list means it was ignored out of linting
     // entirely, which is how `ignores` silently removed the sampler.
-    for (const file of sourceFiles) {
+    for (const file of repoFiles) {
       expect(linted, `${rel(file)} is not linted at all`).toContain(file)
     }
 
@@ -91,24 +111,6 @@ describe('Math.random is absent from the randomness-critical source', () => {
       unguarded,
       'Math.random guard is not enforced for these files',
     ).toEqual([])
-  })
-
-  // A lone `/* eslint-disable no-restricted-syntax */` in a new file would otherwise
-  // disarm the guard with no config change, and the text scan cannot see the alias form.
-  it('forbids inline eslint-disable from switching the guard off', async () => {
-    const { ESLint } = await import('eslint')
-    const linter = new ESLint({ cwd: ROOT })
-    const [res] = await linter.lintText(
-      `/* eslint-disable no-restricted-syntax */\nconst MM = Math\nexport const x = MM.random()\n`,
-      {
-        filePath: join(ROOT, 'scripts', 'lib', 'prefix.mjs'),
-        warnIgnored: false,
-      },
-    )
-    expect(
-      res.messages.filter((m) => m.ruleId === 'no-restricted-syntax'),
-      'an inline disable comment switched the guard off',
-    ).not.toEqual([])
   })
 
   it.each(SCANNED)('finds no Math.random under %s/', (dirName) => {
