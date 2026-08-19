@@ -18,9 +18,15 @@ on:
         required: false
         default: '9500'
 
+# A called reusable workflow cannot request permissions the CALLER does not hold, and
+# GitHub rejects the whole workflow at startup if it tries. The `publish` job calls
+# deploy-pages.yml, which needs pages/id-token — so those must be granted here too,
+# even though no step in this workflow uses them directly.
 permissions:
   contents: write # push to the `pool` branch
   issues: write # raise the health alarm
+  pages: write # required by the reusable deploy-pages.yml
+  id-token: write # required by the reusable deploy-pages.yml
 
 # Never let a manual run collide with the cron and fight over the branch.
 concurrency:
@@ -68,6 +74,13 @@ jobs:
           git config user.name  "harvest-bot"
           git config user.email "harvest-bot@users.noreply.github.com"
           git add -A
+          # A quota-capped run can legitimately produce no new videos. Committing
+          # nothing is not a failure, so tolerate an empty diff rather than failing
+          # the workflow and raising a false alarm.
+          if git diff --cached --quiet; then
+            echo "No pool changes to publish."
+            exit 0
+          fi
           git commit -q -m "harvest: pool at $(node -e "console.log(require('./manifest.json').total)") videos"
           git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:pool
         # Force-push is correct here: the pool branch is a published snapshot of
