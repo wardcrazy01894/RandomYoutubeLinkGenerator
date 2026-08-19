@@ -18,9 +18,15 @@ on:
         required: false
         default: '9500'
 
+# A called reusable workflow cannot request permissions the CALLER does not hold, and
+# GitHub rejects the whole workflow at startup if it tries. The `publish` job calls
+# deploy-pages.yml, which needs pages/id-token — so those must be granted here too,
+# even though no step in this workflow uses them directly.
 permissions:
   contents: write # push to the `pool` branch
   issues: write # raise the health alarm
+  pages: write # required by the reusable deploy-pages.yml
+  id-token: write # required by the reusable deploy-pages.yml
 
 # Never let a manual run collide with the cron and fight over the branch.
 concurrency:
