@@ -1,6 +1,7 @@
 {
-  "counter": 0,
+  "counter": 2,
   "reharvestCursor": 0,
-  "sweeps": 0,
-  "totalBuckets": 23
+  "sweeps": 2,
+  "totalBuckets": 25,
+  "sweepCursor": 0
 }
