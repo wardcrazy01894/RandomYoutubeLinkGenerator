@@ -31,6 +31,13 @@ export interface Manifest {
     lastRunUtc: string | null
     buckets: number
     yield: number | null
+    /** Threshold the yield gate compares against. Only healthy, untruncated runs move it. */
+    baselineYield?: number | null
+    /** Run shape: distinguishes a complete run from one that abandoned its fresh plan. */
+    freshPlanned?: number
+    freshAttempted?: number
+    reharvestAttempted?: number
+    truncated?: boolean
   }
   stats: Record<string, unknown>
 }
