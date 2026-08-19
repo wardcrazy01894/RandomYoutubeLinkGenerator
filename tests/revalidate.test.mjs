@@ -231,6 +231,19 @@ describe('mass-removal guard', () => {
     expect(m.stats.lastSweep.refused).toBe(false)
   })
 
+  // The ratio alone would refuse this: 2/9 is 22%, over the 20% cap. The flat floor is
+  // what lets a young pool lose two genuinely-deleted videos. Dropping the floor left
+  // the whole suite green, so this case is the only thing holding it in place.
+  it('lets a tiny pool lose a couple of videos the ratio alone would refuse', () => {
+    seed(9)
+    const r = run({ STUB_DEAD: [id(0), id(1)].join(',') })
+    expect(
+      r.out,
+      'below the absolute floor, so the ratio must not decide',
+    ).not.toMatch(/REFUSING/)
+    expect(tombs().sort()).toEqual([id(0), id(1)].sort())
+  })
+
   it('allows a small genuine cleanup', () => {
     seed(200)
     const r = run({ STUB_DEAD: [id(0), id(1)].join(',') })

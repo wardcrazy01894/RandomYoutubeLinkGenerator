@@ -214,13 +214,16 @@ Daily budget against 10,000 units, at the measured k=5 rate of ~5 videos/bucket:
 
 | Call                               | Unit cost  | Per day   | Units |
 | ---------------------------------- | ---------- | --------- | ----- |
-| `search.list` (new buckets)        | 100        | ~66       | 6,600 |
-| `search.list` (rolling re-harvest) | 100        | ~28       | 2,800 |
+| `search.list` (new buckets)        | 100        | ~62       | 6,200 |
+| `search.list` (rolling re-harvest) | 100        | ~27       | 2,700 |
 | `videos.list` enrichment           | 1 / 50 IDs | ~10 calls | 10    |
+| Re-validation sweep (§5.3)         | 1 / 50 IDs | 25,000    | 500   |
 | Reserve                            |            |           | ~590  |
 
-≈ 89 buckets/night, of which ~83% exhaust, x ~5 members = **~370 new videos/night**, each
-fully enriched. That is ~140k/year, against a prefix space that takes over a millennium to
+62 + 27 ≈ 89 buckets/night, of which ~83% exhaust, x ~5 members = **~370 new
+videos/night**, each fully enriched. `HARVEST_UNITS` defaults to 9,000 rather than the
+full 10,000 precisely because the sweep shares the day and the reserve has to survive a
+retry. That is ~140k/year, against a prefix space that takes over a millennium to
 exhaust.
 
 ## 3.7 Choosing k: measured, not derived

@@ -123,15 +123,50 @@ jobs:
       # fault rather than real deletions, and it deliberately exits 0 and advances the
       # cursor so one bad window cannot wedge the sweep forever. That makes the refusal
       # invisible unless something reads the flag — this step is that reader.
-      - name: Alarm if the sweep refused its findings
+      # A `::warning::` on an otherwise-green run notifies nobody — you only see it by
+      # opening the run. Route this into the same harvester-health issue the hard
+      # failures use, because that emails.
+      - name: Did the sweep refuse its findings?
+        id: sweep
         run: |
-          refused=$(node -e "
+          node -e "
             const m = require('./public/data/pool/manifest.json')
-            process.stdout.write(String(m.stats?.lastSweep?.refused === true))
-          ")
-          if [ "$refused" = "true" ]; then
-            echo "::warning::Re-validation refused a window's findings (mass-removal guard tripped). Check manifest.stats.lastSweep."
-          fi
+            process.stdout.write('refused=' + (m.stats?.lastSweep?.refused === true))
+          " >> "$GITHUB_OUTPUT"
+
+      - name: Report a refused sweep
+        if: steps.sweep.outputs.refused == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const body = [
+              `Re-validation **refused** this window's findings: it would have removed more`,
+              `of the window than the mass-removal guard allows, which is far more likely to`,
+              `be a bad API response than reality.`,
+              ``,
+              `Nothing was tombstoned for that window, and the cursor still advanced — the`,
+              `sweep is NOT wedged, and the window is re-examined on the next full pass.`,
+              `One of these is routine. Several nights running is not: check whether`,
+              `videos.list is returning empty items for valid ids.`,
+              ``,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n')
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'harvester-health',
+            })
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: 'Harvester health: re-validation refused a window',
+                body, labels: ['harvester-health'],
+              })
+            }
 
       - name: Verify pool invariants before publishing
         run: node scripts/check-pool.mjs

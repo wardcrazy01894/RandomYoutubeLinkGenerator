@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Incremental re-validation sweep. docs/DESIGN.md §5.3.
 //
-// This is the pool's primary SAFETY mechanism, not just staleness hygiene: videos that
-// YouTube has removed or made private since we harvested them stop being served.
+// This removes videos YouTube has deleted or made private since we harvested them. It is
+// deliberately NOT described as the primary safety mechanism (see DESIGN §5.3, "What it
+// is not") — a deleted video cannot play anyway, and the client's onError already hides
+// it. The value here is pool-wide removal and an honest served count.
 // Age-restriction and embeddability are deliberately NOT swept — they are governed by the
 // safe-mode toggle, and tombstoning them would convert a filter the viewer can lift into
 // a removal they cannot. See the dead-detection block below.
