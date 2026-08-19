@@ -85,8 +85,10 @@ Ordered by how much they should worry you.
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
    they did not exist for earlier draws. A rolling fraction of each night's budget
    re-harvests older buckets to bound this.
-7. **Safety filtering (on by default).** The default view hides age-restricted and reported
-   videos. Turning that off in the footer gives you the unfiltered frame.
+7. **Safety filtering (on by default).** The default view hides age-restricted and
+   non-embeddable videos; the footer toggle turns both off. Two exclusions are **not** covered by the toggle and
+   always apply: the maintainer's `blocklist.json`, and videos you have hidden yourself in
+   this browser. So the toggle widens the frame, it does not make it unfiltered.
 8. **Harvester locale.** Results are region- and language-conditioned; we pin `US`/`en`
    explicitly so the bias is fixed and stated rather than drifting.
 
@@ -109,6 +111,7 @@ That is the honest texture of the platform, and it is the point of the site. It 
 a uniform draw will sometimes surface ordinary people — often children — who never
 anticipated an audience. So the site never autoplays, defaults to excluding age-restricted
 material, holds newly uploaded videos back for 30 days while moderation catches up,
-re-validates the pool weekly, and offers a report control on every draw.
+re-validates the pool weekly, and offers a control on every draw that hides a video for
+you — and opens a prefilled report to send, when a contact address is configured.
 
 None of that makes the pool "safe". It makes it _considered_.

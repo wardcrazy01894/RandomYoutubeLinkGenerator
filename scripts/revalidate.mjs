@@ -16,6 +16,7 @@ import {
   readShard,
   readTombstones,
   writeTombstones,
+  readBlocklist,
   SHARD_SIZE,
 } from './lib/pool.mjs'
 import { loadKey } from './lib/env.mjs'
@@ -24,6 +25,22 @@ const key = loadKey()
 const manifest = readManifest()
 const tombstones = readTombstones()
 const known = new Set(tombstones.ids)
+
+// Blocklisted videos are filtered client-side at draw time, but the sweep never knew
+// about them — so pool statistics counted removed videos as live, and the docs claiming
+// the blocklist was "honoured by the sweep" were unbacked. Fold them into tombstones,
+// which is effectively what they are, and skip spending quota re-checking them.
+const blocklisted = readBlocklist().ids ?? []
+let newlyBlocked = 0
+for (const id of blocklisted) {
+  if (!known.has(id)) {
+    known.add(id)
+    newlyBlocked++
+  }
+}
+if (newlyBlocked > 0) {
+  console.log(`folded ${newlyBlocked} blocklisted ids into tombstones`)
+}
 
 const shards = Math.ceil(manifest.total / SHARD_SIZE)
 const all = []

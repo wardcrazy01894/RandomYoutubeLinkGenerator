@@ -346,10 +346,15 @@ play it", and it is the cheapest, highest-leverage mitigation available.
 
 ### 5.2 Safe-by-default subset
 
-Default excludes age-restricted (`contentDetails.contentRating.ytRating`), non-embeddable,
-and blocklisted videos. A clearly-labelled opt-out serves the full uniform pool, with a
-persistent banner stating the draw is no longer the default frame. The exclusion rate is
-published — it is an interesting statistic in its own right.
+The default view excludes age-restricted (`contentDetails.contentRating.ytRating`) and
+non-embeddable videos. A clearly-labelled opt-out lifts both, with a persistent banner
+stating the draw is no longer the default frame.
+
+Two exclusions are **not** governed by that toggle and always apply: the maintainer's
+`blocklist.json`, and videos the viewer has hidden in their own browser. So the opt-out
+widens the frame; it does not make the draw unfiltered, and the banner says so. The
+exclusion rates are reported by `npm run pool-stats` — they are interesting statistics in
+their own right.
 
 This is stated plainly as a filter, **not a safety guarantee**. No automated signal
 identifies "home video of somebody's kids", and we do not pretend otherwise.
@@ -362,8 +367,15 @@ primary safety mechanism, and it runs weekly.
 
 ### 5.4 Report path, blocklist, kill switch
 
-A Report control on every draw; `data/blocklist.json` is filtered at draw time and honoured
-by the sweep; a contact address in the footer; and a documented 60-second kill switch.
+A control on every draw that hides the video for that viewer — best effort, since it needs
+local storage and the list is capped — and additionally opens a prefilled report when a
+contact address is configured (`VITE_REPORT_EMAIL`, a repo variable, since the value is
+inlined into the public bundle). With no address the control is labelled "Hide this video"
+and files nothing, rather than claiming to. `blocklist.json` is filtered at draw time, is authoritative on `main`, and is honoured
+by the sweep. Plus a documented 60-second kill switch.
+
+The contact address lives only in that control, not as a separate footer mailto — one
+scrapeable address is enough, and a second would claim a channel nobody monitors.
 
 Reports **must not** route to public GitHub issues — that would build a searchable public
 index of the worst content on the site.

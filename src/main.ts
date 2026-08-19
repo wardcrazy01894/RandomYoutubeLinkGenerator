@@ -16,7 +16,16 @@ const MAX_AUTO_ADVANCE = 5
 const DEAD_LIST_CAP = 2000
 const DEAD_KEY = 'ryl.dead.v1'
 const STALE_AFTER_DAYS = 3
-const REPORT_TO = import.meta.env.VITE_REPORT_EMAIL ?? ''
+// Validated once rather than encoded. encodeURIComponent would turn '@' into '%40',
+// which RFC 6068 does not permit in the addr-spec (the '@' must be literal; a
+// pct-encoded local-part like '%2B' for '+' is fine, so plus-aliases survive either
+// way). Validating instead means a malformed repo variable degrades to the honest
+// hide-only path rather than shipping a mailto no client can use.
+// '#' is excluded too: an address containing one turns the rest of the mailto into a URL
+// fragment, so subject and body vanish silently.
+const REPORT_ADDRESS_RE = /^[^\s@,?&#]+@[^\s@,?&#]+\.[^\s@,?&#]+$/
+const RAW_REPORT_TO = import.meta.env.VITE_REPORT_EMAIL ?? ''
+const REPORT_TO = REPORT_ADDRESS_RE.test(RAW_REPORT_TO) ? RAW_REPORT_TO : ''
 
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T
@@ -52,9 +61,17 @@ function readDead(): string[] {
   }
 }
 function markDead(id: string): void {
-  const list = readDead().filter((x) => x !== id)
-  list.push(id)
-  localStorage.setItem(DEAD_KEY, JSON.stringify(list.slice(-DEAD_LIST_CAP)))
+  // Storage can be unavailable (private browsing, partitioned or disabled storage). The
+  // read side already tolerated that; without the same guard here the click threw before
+  // the banner and before the redraw, so the control appeared to do nothing at all.
+  // Hiding is best-effort and capped, so it is not permanent — the docs say so.
+  try {
+    const list = readDead().filter((x) => x !== id)
+    list.push(id)
+    localStorage.setItem(DEAD_KEY, JSON.stringify(list.slice(-DEAD_LIST_CAP)))
+  } catch {
+    /* not persisted — the draw still advances */
+  }
 }
 const excluded = (): Set<string> => new Set([...blocked, ...readDead()])
 
@@ -182,15 +199,19 @@ async function play(): Promise<void> {
 function report(): void {
   if (!current) return
   markDead(current.id)
-  const subject = encodeURIComponent(`Report: ${current.id}`)
-  const body = encodeURIComponent(
-    `Video: https://www.youtube.com/watch?v=${current.id}\nTitle: ${current.t}\n\nWhy this should be removed from the pool:\n`,
-  )
-  if (REPORT_TO)
+  if (REPORT_TO) {
+    const subject = encodeURIComponent(`Report: ${current.id}`)
+    const body = encodeURIComponent(
+      `Video: https://www.youtube.com/watch?v=${current.id}\nTitle: ${current.t}\n\nWhy this should be removed from the pool:\n`,
+    )
     window.location.href = `mailto:${REPORT_TO}?subject=${subject}&body=${body}`
-  showBanner(
-    'Thanks — that video is now hidden for you and flagged for removal from the pool.',
-  )
+    showBanner(
+      'Thanks — that video is hidden for you, and your report is ready to send.',
+    )
+  } else {
+    // Never claim a report was filed when nothing was sent.
+    showBanner('That video is now hidden for you.')
+  }
   void draw()
 }
 
@@ -225,12 +246,18 @@ async function boot(): Promise<void> {
 
   els.draw.addEventListener('click', () => void draw())
   els.play.addEventListener('click', () => void play())
+  // The control always works: it hides the video locally and redraws. Only the mailto
+  // half depends on configuration, so the label and the banner say what actually
+  // happened rather than claiming a report was filed when none was sent.
+  // Reports deliberately do NOT fall back to public GitHub issues — that would build a
+  // searchable public index of the worst content the site can surface.
+  els.report.textContent = REPORT_TO ? 'Report this video' : 'Hide this video'
   els.report.addEventListener('click', report)
   els.safe.addEventListener('change', () => {
     els.banner.hidden = els.safe.checked
     if (!els.safe.checked) {
       showBanner(
-        'Age-restriction filtering is off. This is the full uniform pool, unfiltered.',
+        'Age-restriction filtering is off. Blocklisted and locally-hidden videos are still excluded.',
       )
     }
   })
