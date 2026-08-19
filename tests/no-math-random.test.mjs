@@ -19,7 +19,7 @@ const SCANNED = ['src', 'scripts']
 const EXTENSIONS = ['.ts', '.mjs', '.js']
 
 /** Math.random, Math['random'], Math [ "random" ] — with arbitrary whitespace. */
-const FORBIDDEN = /Math\s*(?:\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
+const FORBIDDEN = /Math\s*(?:\??\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
 
 function walk(dir) {
   const out = []
@@ -65,29 +65,45 @@ describe('Math.random is absent from the randomness-critical source', () => {
 
   // Makes CLAUDE.md's claim that BOTH layers are mutation-verified literally true: the
   // lint selectors are config, and a typo in any of them would otherwise fail nothing.
-  it('has lint selectors that actually fire, for every accidental form', async () => {
+  it('has lint selectors that actually fire, in every guarded tree', async () => {
     const { ESLint } = await import('eslint')
     const linter = new ESLint({ cwd: ROOT })
     const offending = [
-      'export const a = Math.random()',
-      "export const b = Math['random']()",
-      'export const c = globalThis.Math.random()',
-      'const M = Math\nexport const d = M.random()',
-      'const { random } = Math\nexport const e = random()',
+      'export const aa = Math.random()',
+      "export const bb = Math['random']()",
+      'export const cc = globalThis.Math.random()',
+      'const MM = Math\nexport const dd = MM.random()',
+      'const { random } = Math\nexport const ee = random()',
     ]
-    for (const code of offending) {
-      const [res] = await linter.lintText(`${code}\n`, {
-        filePath: 'probe.mjs',
-      })
-      expect(res.errorCount, `should be rejected: ${code}`).toBeGreaterThan(0)
+    // Probe each guarded tree, not just the repo root. Flat config is later-wins per
+    // rule, so a `no-restricted-syntax` block scoped to src/**/*.ts silently deletes
+    // these selectors THERE while a root-only probe stays green — which is exactly how
+    // this guard died the first time.
+    const probes = ['src/__probe.ts', 'scripts/__probe.mjs', '__probe.mjs']
+
+    // Assert on the RULE, not errorCount: an unrelated rule firing would otherwise make
+    // a completely dead guard look alive, and an unrelated rule on the clean sample
+    // would look like the guard had broken.
+    const banned = (res) =>
+      res.messages.filter((m) => m.ruleId === 'no-restricted-syntax')
+
+    for (const filePath of probes) {
+      for (const code of offending) {
+        const [res] = await linter.lintText(`${code}\n`, { filePath })
+        expect(
+          banned(res),
+          `should be rejected in ${filePath}: ${code}`,
+        ).not.toEqual([])
+      }
+      const [clean] = await linter.lintText(
+        'export const ok = Math.floor(1.5)\n',
+        { filePath },
+      )
+      expect(
+        banned(clean),
+        `Math.floor must stay legal in ${filePath}`,
+      ).toEqual([])
     }
-    const [clean] = await linter.lintText(
-      'export const ok = Math.floor(1.5)\n',
-      {
-        filePath: 'probe.mjs',
-      },
-    )
-    expect(clean.errorCount, 'Math.floor must stay legal').toBe(0)
   })
 
   it('detects the patterns it claims to detect', () => {
@@ -97,6 +113,7 @@ describe('Math.random is absent from the randomness-critical source', () => {
       "const x = Math['random']()",
       'const x = Math . random ()',
       'const x = Math[ "random" ]()',
+      'const x = Math?.random()',
     ]) {
       expect(FORBIDDEN.test(sample)).toBe(true)
     }

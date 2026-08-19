@@ -49,8 +49,9 @@ export default tseslint.config(
             'Math.random is not a CSPRNG. Use randomBelow() from src/random.ts, or randomInt() from node:crypto in scripts.',
         },
         {
-          // const M = Math  /  const { random } = Math — aliasing or destructuring the
-          // Math object escapes every member-expression selector above.
+          // const M = Math  /  const { random } = Math — declaration-form aliasing or
+          // destructuring escapes every member-expression selector above. Assignment
+          // form (`let M; M = Math`) is not covered: that is evasion, not accident.
           selector: "VariableDeclarator[init.name='Math']",
           message:
             'Do not alias or destructure Math — it defeats the Math.random ban. Reference Math members directly.',
