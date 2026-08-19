@@ -166,7 +166,7 @@ lifetime. The window length is published.
 1. **Search-index coverage.** Unlisted, private, and deleted videos are absent — correct,
    they are not public. Videos demoted or excluded by search are under-represented by an
    unknown amount. Partly this is safety filtering we _want_.
-2. **Embeddability.** We serve only embeddable videos, excluding most major-label music
+2. **Embeddability.** By default we serve only embeddable videos, excluding most major-label music
    and many news orgs. Measured from `status.embeddable` and published as a percentage.
 3. **Age-restriction / safety subsetting.** Default view excludes age-restricted videos
    (§6). Opt-out is available and clearly labelled.
@@ -350,8 +350,12 @@ The default view excludes age-restricted (`contentDetails.contentRating.ytRating
 non-embeddable videos. A clearly-labelled opt-out lifts both, with a persistent banner
 stating the draw is no longer the default frame.
 
-Two exclusions are **not** governed by that toggle and always apply: the maintainer's
-`blocklist.json`, and videos the viewer has hidden in their own browser. So the opt-out
+Three exclusions are **not** governed by that toggle and always apply: the maintainer's
+`blocklist.json`, `tombstones.json` (videos the weekly sweep found deleted or made
+private), and videos the viewer has hidden in their own browser. All three are permanent
+states rather than preferences, which is why the toggle does not reach them — and it is
+also why the sweep tombstones _only_ those states, never embeddability or age-restriction,
+which the toggle does govern. So the opt-out
 widens the frame; it does not make the draw unfiltered, and the banner says so. The
 exclusion rates are reported by `npm run pool-stats` — they are interesting statistics in
 their own right.
@@ -363,7 +367,9 @@ identifies "home video of somebody's kids", and we do not pretend otherwise.
 
 Harvest, hold 7 days, re-validate, then serve. Videos YouTube removes in that window never
 reach a viewer. Revision 1 framed this sweep as staleness hygiene; it is actually the
-primary safety mechanism, and it runs weekly.
+primary safety mechanism. NOTE: nothing currently schedules it — it is a manual
+`npm run revalidate` (see docs/OPERATIONS.md). Automating it is the outstanding
+follow-up, and until then the cadence is whatever an operator actually does.
 
 ### 5.4 Report path, blocklist, kill switch
 
@@ -410,7 +416,8 @@ Matching the house conventions, plus what review found missing:
 ## 8. What the site actually claims
 
 "Truly random" is not defensible and is retired. The real frame is: _public videos that are
-in the search index, have a dash at position 5, are embeddable, survived re-validation, and
+in the search index, have a dash at position 5, are embeddable in the default view,
+survived re-validation, and
 are not blocklisted._
 
 Uniform-over-a-stated-frame is a **stronger** claim than "truly random", because it is

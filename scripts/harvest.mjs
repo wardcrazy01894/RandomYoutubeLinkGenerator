@@ -305,7 +305,7 @@ if (
 // --- commit -----------------------------------------------------------------
 const total = appendRecords(records, manifest.total)
 // Everything in the pool has already cleared the upload-age quarantine at harvest time,
-// so the whole pool is servable; the client still filters safety flags and tombstones.
+// so the whole pool is servable; the client filters blocklist, tombstones and flags.
 const servable = total
 
 // Advance by prefixes we actually QUERIED, not by the number planned. The loop exits

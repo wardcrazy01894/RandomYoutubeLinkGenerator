@@ -159,6 +159,12 @@ that are silently discarded on the next harvest or deploy.
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
 copied back and forth:
 
+The sweep refuses to write if a single run would remove more than 20% of what it checked
+(or if nothing at all survived) — a `videos.list` response of HTTP 200 with an empty
+`items` array is neither a quota error nor a key error, and would otherwise tombstone the
+whole pool permanently. If a large cleanup really is legitimate, re-run with
+`ALLOW_MASS_REMOVAL=1`.
+
 ```bash
 git clone --branch pool --single-branch \
   git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git pool-data

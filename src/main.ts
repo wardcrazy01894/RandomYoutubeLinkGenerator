@@ -2,6 +2,7 @@ import './style.css'
 import {
   loadManifest,
   loadBlocklist,
+  loadTombstones,
   drawRandom,
   poolAgeDays,
   EmptyPoolError,
@@ -218,7 +219,15 @@ function report(): void {
 // --- boot -------------------------------------------------------------------
 async function boot(): Promise<void> {
   try {
-    ;[manifest, blocked] = await Promise.all([loadManifest(), loadBlocklist()])
+    ;[manifest, blocked] = await Promise.all([
+      loadManifest(),
+      // Blocklist (maintainer removals) and tombstones (sweep findings: gone or made
+      // private) are both PERMANENT exclusions, so they merge into one set. Toggle-governed
+      // filters — age-restriction, embeddability — are deliberately not in here.
+      Promise.all([loadBlocklist(), loadTombstones()]).then((lists) =>
+        lists.flat(),
+      ),
+    ])
   } catch {
     els.subhead.textContent = 'The pool could not be loaded.'
     showBanner(
@@ -257,7 +266,7 @@ async function boot(): Promise<void> {
     els.banner.hidden = els.safe.checked
     if (!els.safe.checked) {
       showBanner(
-        'Age-restriction filtering is off. Blocklisted and locally-hidden videos are still excluded.',
+        'Age-restriction and embeddability filtering are off. Removed, blocklisted and locally-hidden videos are still excluded.',
       )
     }
   })

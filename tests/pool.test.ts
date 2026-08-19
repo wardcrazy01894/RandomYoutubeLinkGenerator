@@ -142,6 +142,89 @@ describe('drawRandom', () => {
   })
 })
 
+describe('toggle-governed filters are filters, not deletions', () => {
+  // The direction that regressed: tombstoning age-restricted videos excluded them even
+  // with safe mode OFF, silently converting a filter the viewer can lift into a removal
+  // they cannot. The sweep now tombstones only permanent states; these pin the contract
+  // the sweep must not violate.
+  it('draws an age-restricted video when safe mode is off', async () => {
+    mockShards({ '0-0': { age: true } })
+    const seen = new Set<string>()
+    for (let i = 0; i < 300; i++) {
+      seen.add(
+        (
+          await drawRandom(manifest(10, 10), {
+            safeMode: false,
+            excluded: new Set(),
+          })
+        ).id,
+      )
+    }
+    expect(
+      seen.has('0-0'),
+      'age-restricted must be reachable with the toggle off',
+    ).toBe(true)
+  })
+
+  it('draws a non-embeddable video when safe mode is off', async () => {
+    mockShards({ '0-0': { emb: false } })
+    const seen = new Set<string>()
+    for (let i = 0; i < 300; i++) {
+      seen.add(
+        (
+          await drawRandom(manifest(10, 10), {
+            safeMode: false,
+            excluded: new Set(),
+          })
+        ).id,
+      )
+    }
+    expect(
+      seen.has('0-0'),
+      'non-embeddable must be reachable with the toggle off',
+    ).toBe(true)
+  })
+
+  it('excludes a tombstoned video under BOTH toggle states', async () => {
+    mockShards({ '0-0': { age: true } })
+    for (const safeMode of [true, false]) {
+      for (let i = 0; i < 100; i++) {
+        const r = await drawRandom(manifest(10, 10), {
+          safeMode,
+          excluded: new Set(['0-0']),
+        })
+        expect(r.id).not.toBe('0-0')
+      }
+    }
+  })
+})
+
+describe('tombstones', () => {
+  // The weekly sweep writes tombstones.json, and it was deployed but never fetched — so
+  // videos YouTube had removed kept being drawn while three comments claimed the client
+  // filtered them. These pin that the exclusion set is honoured however it is composed.
+  it('never draws a tombstoned id', async () => {
+    mockShards()
+    const excluded = new Set(['0-0', '0-1', '0-2', '0-3', '0-4'])
+    for (let i = 0; i < 200; i++) {
+      const r = await drawRandom(manifest(10, 10), { safeMode: true, excluded })
+      expect(excluded.has(r.id)).toBe(false)
+    }
+  })
+
+  it('applies exclusions even with safe mode off', async () => {
+    mockShards()
+    const excluded = new Set(['0-0', '0-1', '0-2', '0-3', '0-4'])
+    for (let i = 0; i < 200; i++) {
+      const r = await drawRandom(manifest(10, 10), {
+        safeMode: false,
+        excluded,
+      })
+      expect(excluded.has(r.id)).toBe(false)
+    }
+  })
+})
+
 describe('poolAgeDays', () => {
   it('returns null when the pool has never been generated', () => {
     expect(poolAgeDays({ ...manifest(0), generatedAt: null })).toBeNull()
