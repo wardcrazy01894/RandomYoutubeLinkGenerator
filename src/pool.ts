@@ -30,7 +30,10 @@ export interface Manifest {
     status: string
     lastRunUtc: string | null
     buckets: number
+    /** New videos per FRESH bucket. Re-harvest buckets are excluded deliberately. */
     yield: number | null
+    /** Overall yield across fresh AND re-harvest buckets — diagnosis only. */
+    yieldAll?: number
     /** Threshold the yield gate compares against. Only healthy, untruncated runs move it. */
     baselineYield?: number | null
     /** Run shape: distinguishes a complete run from one that abandoned its fresh plan. */

@@ -165,7 +165,10 @@ describe('harvest counter', () => {
   // The round-four bug: freezing the counter while still harvesting poisoned the next
   // run's yield. Nothing may be committed against a frozen counter.
   it('stops issuing fresh queries once a bucket has failed', () => {
-    run({ HARVEST_UNITS: '3000', STUB_FAIL_AT: '2' })
+    const r = run({ HARVEST_UNITS: '3000', STUB_FAIL_AT: '2' })
+    // Exit code asserted too: `queried().length <= 1` is satisfied by 0, so without this
+    // the test passed even when the harvester crashed before issuing any query.
+    expect(r.code, r.out).toBe(0)
     expect(queried().length).toBeLessThanOrEqual(1)
   })
 
@@ -259,6 +262,9 @@ describe('baseline escape hatch and truncation', () => {
     seed({ baselineYield: 5 })
     const r = run({ HARVEST_UNITS: '2600', STUB_PER_BUCKET: '1' })
     expect(r.code).toBe(1)
+    // Asserts the STATUS too: baselineYield alone is the seeded value, so this test
+    // passed even when the harvester crashed before running.
+    expect(manifest().health.status).toBe('yield-collapsed')
     expect(manifest().health.baselineYield).toBe(5)
   })
 })
@@ -277,6 +283,9 @@ describe('escape hatch cannot be turned into a silencer', () => {
       r.code,
       'a collapsed run must still fail with the hatch set to 0',
     ).toBe(1)
+    // Asserts the STATUS too: baselineYield alone is the seeded value, so this test
+    // passed even when the harvester crashed before running.
+    expect(manifest().health.status).toBe('yield-collapsed')
     expect(manifest().health.baselineYield).toBe(5)
   })
 
@@ -288,6 +297,9 @@ describe('escape hatch cannot be turned into a silencer', () => {
       HARVEST_BASELINE_RESET: 'false',
     })
     expect(r.code).toBe(1)
+    // Asserts the STATUS too: baselineYield alone is the seeded value, so this test
+    // passed even when the harvester crashed before running.
+    expect(manifest().health.status).toBe('yield-collapsed')
     expect(manifest().health.baselineYield).toBe(5)
   })
 

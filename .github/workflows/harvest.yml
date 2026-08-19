@@ -17,6 +17,11 @@ on:
         description: 'Quota units to spend (max 10000/day)'
         required: false
         default: '9500'
+      baseline_reset:
+        description: 'Relearn the yield baseline from this run (accepts a permanently changed yield)'
+        type: boolean
+        required: false
+        default: false
 
 # A called reusable workflow cannot request permissions the CALLER does not hold, and
 # GitHub rejects the whole workflow at startup if it tries. The `publish` job calls
@@ -97,6 +102,10 @@ jobs:
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           HARVEST_UNITS: ${{ github.event.inputs.units || '9500' }}
+          # Only ever '1' or unset. Documented recovery was "clear baselineYield on the
+          # pool branch by hand", which bypasses the relearn guard and can leave the gate
+          # disarmed with no warning; this path keeps that guard.
+          HARVEST_BASELINE_RESET: ${{ github.event.inputs.baseline_reset == 'true' && '1' || '' }}
         run: node scripts/harvest.mjs
 
       - name: Verify pool invariants before publishing

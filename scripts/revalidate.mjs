@@ -33,6 +33,11 @@ const known = new Set(tombstones.ids)
 // blocklist.json on every deploy, but nothing restores tombstones.json — so deleting an
 // id from the blocklist left the video excluded forever via a file no one edits back. It
 // also made every description of tombstones.json ("only permanent states") untrue.
+//
+// The trade: a blocklisted video that is ALSO deleted never gets tombstoned, so
+// un-blocklisting it briefly resurrects a dead one. That self-heals — the player's
+// onError hides it locally and auto-advances, and the next sweep tombstones it — which is
+// a better failure than a removal nobody can undo.
 const blocklisted = new Set(readBlocklist().ids ?? [])
 const skip = new Set([...known, ...blocklisted])
 
@@ -91,11 +96,11 @@ const MAX_REMOVAL_RATIO = 0.2
 // Deliberate override for a genuinely large cleanup, so a >20% removal cannot wedge the
 // sweep forever (every later run would re-check the same records and refuse again).
 const ALLOW_MASS_REMOVAL = process.env.ALLOW_MASS_REMOVAL === '1'
-// An absolute floor alongside the ratio, replacing an earlier sample-size floor that let
-// 48 dead out of 49 checked (98%) slip past: a small pool is exactly where a bad response
-// wipes everything. Two genuine deletions on an early pool stay under this and do not
-// trip the guard.
-const MIN_ABSOLUTE_REMOVALS = 10
+// An absolute floor alongside the ratio, so two genuine deletions on an early pool do
+// not trip a percentage guard. It scales with the pool: a fixed floor of 10 let 9 dead
+// out of 10 checked (90%) through, and a small pool is exactly where one bad response
+// wipes everything.
+const MIN_ABSOLUTE_REMOVALS = Math.max(3, Math.ceil(manifest.total * 0.05))
 // `dead === checked` is refused unconditionally, floor or no floor: a sweep in which
 // NOTHING survived is a bad response, not a pool that vanished. The ratio floor alone
 // left a 49-record pool wipeable in a single run.
@@ -140,5 +145,6 @@ writeManifest(manifest)
 
 console.log(`checked ${checked}, removed ${dead.length}`, byReason)
 console.log(
-  `pool: ${manifest.total} harvested, ${manifest.total - known.size} still live`,
+  `pool: ${manifest.total} harvested, ` +
+    `${manifest.total - known.size - blocklisted.size} still served`,
 )
