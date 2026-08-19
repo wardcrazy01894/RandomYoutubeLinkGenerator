@@ -83,8 +83,12 @@ jobs:
           # blocklist.json is a human-curated SAFETY file and main is authoritative for
           # it. Without this, an ID added on main never reaches the site: the pool branch
           # would round-trip its own frozen copy forever.
+          # Not an AND-list: set -e is exempt inside one, so this is safe today only
+          # because it is the step's last line. Any line added below would silently
+          # reintroduce the failure. Same form as deploy-pages.yml.
           git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
-            && mv /tmp/blocklist.json public/data/pool/blocklist.json
+            || { echo "Could not read blocklist.json from main — refusing to continue"; exit 1; }
+          mv /tmp/blocklist.json public/data/pool/blocklist.json
         env:
           GH_PAT: ${{ secrets.GITHUB_TOKEN }}
 

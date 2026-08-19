@@ -110,14 +110,14 @@ The site filters blocklisted IDs at draw time.
 the `pool` branch, so a sweep run against a plain checkout of `main` writes tombstones
 that are silently discarded on the next harvest or deploy.
 
-Run it against the live pool instead:
+Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
+copied back and forth:
 
 ```bash
 git clone --branch pool --single-branch \
   git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git pool-data
-cp -R pool-data/. public/data/pool/ && rm -rf public/data/pool/.git
-npm run revalidate
-cd pool-data && cp -R ../public/data/pool/. . && git add -A \
+POOL_DIR=pool-data npm run revalidate
+cd pool-data && git add -A \
   && git commit -m "revalidate: prune dead videos" && git push
 ```
 

@@ -129,6 +129,13 @@ let quotaHit = false
 
 for (const { n, fresh } of plan) {
   if (remaining() < COST.search * (MAX_PAGES + 1)) break
+  // Once a fresh bucket has failed, the counter is frozen for this run, so any further
+  // fresh query would be re-harvested tomorrow anyway — and worse, committing its records
+  // while the counter stays put collapses tomorrow's yield, trips the yield gate, and the
+  // gate exits BEFORE writeState. That loops: same frozen counter, same collapse, night
+  // after night. Skipping the rest of the fresh plan keeps the damage to a single run and
+  // lets the remaining budget fall through to the re-harvest entries.
+  if (fresh && freshHole) continue
   await sleep(PACING_MS)
   const q = prefixAt(FEISTEL_KEY, n)
   try {
