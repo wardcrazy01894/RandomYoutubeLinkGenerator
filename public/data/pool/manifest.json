@@ -3,20 +3,35 @@
   "shardSize": 1000,
   "total": 105,
   "servable": 105,
-  "generatedAt": "2026-08-19T17:25:29.721Z",
+  "generatedAt": "2026-08-19T22:02:48.833Z",
   "health": {
+    "freshPlanned": 11,
+    "freshAttempted": 2,
+    "reharvestAttempted": 0,
+    "truncated": true,
+    "yieldAll": 0,
     "status": "ok",
-    "lastRunUtc": "2026-08-19T17:25:29.721Z",
-    "buckets": 3,
-    "yield": 7.333333333333333,
+    "lastRunUtc": "2026-08-19T22:02:48.833Z",
+    "buckets": 2,
+    "yield": 0,
     "baselineYield": null
   },
   "stats": {
     "prefixLength": 5,
     "prefixSpace": 39357381,
-    "bucketsEverDrawn": 23,
-    "embeddablePct": 100,
-    "ageRestrictedPct": 0,
-    "minUploadAgeDays": 30
+    "bucketsEverDrawn": 25,
+    "embeddablePct": null,
+    "ageRestrictedPct": null,
+    "minUploadAgeDays": 30,
+    "lastSweep": {
+      "at": "2026-08-19T22:05:30.337Z",
+      "checked": 105,
+      "removed": 0,
+      "byReason": {},
+      "refused": false
+    },
+    "tombstoned": 0,
+    "sweepCursor": 0,
+    "sweepsCompleted": 2
   }
 }
