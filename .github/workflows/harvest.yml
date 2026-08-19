@@ -105,7 +105,7 @@ jobs:
           # Only ever '1' or unset. Documented recovery was "clear baselineYield on the
           # pool branch by hand", which bypasses the relearn guard and can leave the gate
           # disarmed with no warning; this path keeps that guard.
-          HARVEST_BASELINE_RESET: ${{ github.event.inputs.baseline_reset == 'true' && '1' || '' }}
+          HARVEST_BASELINE_RESET: ${{ inputs.baseline_reset && '1' || '' }}
         run: node scripts/harvest.mjs
 
       - name: Verify pool invariants before publishing
@@ -170,8 +170,8 @@ jobs:
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               ``,
               `Triage: docs/OPERATIONS.md — the usual causes are a broken canary`,
-              `(YouTube changed ID tokenization), an invalid/restricted API key, or`,
-              `a collapsed yield.`,
+              `(YouTube changed ID tokenization), a frozen sampling frontier`,
+              `(no-fresh-progress), an invalid/restricted API key, or a collapsed yield.`,
             ].join('\n')
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,

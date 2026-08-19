@@ -96,14 +96,15 @@ const MAX_REMOVAL_RATIO = 0.2
 // Deliberate override for a genuinely large cleanup, so a >20% removal cannot wedge the
 // sweep forever (every later run would re-check the same records and refuse again).
 const ALLOW_MASS_REMOVAL = process.env.ALLOW_MASS_REMOVAL === '1'
-// An absolute floor alongside the ratio, so two genuine deletions on an early pool do
-// not trip a percentage guard. It scales with the pool: a fixed floor of 10 let 9 dead
-// out of 10 checked (90%) through, and a small pool is exactly where one bad response
-// wipes everything.
-const MIN_ABSOLUTE_REMOVALS = Math.max(3, Math.ceil(manifest.total * 0.05))
+
 // `dead === checked` is refused unconditionally, floor or no floor: a sweep in which
 // NOTHING survived is a bad response, not a pool that vanished. The ratio floor alone
 // left a 49-record pool wipeable in a single run.
+// An absolute floor alongside the ratio, so two genuine deletions on a young pool do not
+// trip a percentage guard. It scales with what this run actually CHECKED, not with the
+// pool: scaling by pool size made the floor unreachable on a partial sweep (quota
+// exhausted mid-run), switching the guard off precisely when a bad response is likeliest.
+const MIN_ABSOLUTE_REMOVALS = Math.max(3, Math.ceil(checked * 0.05))
 const wipedEverything = checked > 0 && dead.length === checked
 if (
   !ALLOW_MASS_REMOVAL &&
@@ -146,5 +147,5 @@ writeManifest(manifest)
 console.log(`checked ${checked}, removed ${dead.length}`, byReason)
 console.log(
   `pool: ${manifest.total} harvested, ` +
-    `${manifest.total - known.size - blocklisted.size} still served`,
+    `${manifest.total - new Set([...known, ...blocklisted]).size} still served`,
 )

@@ -60,7 +60,7 @@ the alarm for the case that has no yield to measure — it exists because gating
 yield left exactly this scenario reporting `ok` night after night.
 
 Usually one prefix at the frontier is failing persistently. `lib/youtube.mjs` already
-retries 429/5xx five times with backoff and throws immediately on 4xx, so a failure that
+retries 429/5xx five times with backoff and throws immediately on other 4xx, so a failure that
 reaches here is not a blip. Check the run log for the `bucket <prefix> failed:` line and
 the status code behind it. A quota-capped run reports `ok-quota-capped` instead and is
 never this.
@@ -93,7 +93,7 @@ have looked at the numbers and accepted a new normal, relearn the baseline expli
 
 ```bash
 HARVEST_BASELINE_RESET=1 npm run harvest      # locally, or
-gh workflow run harvest.yml -f units=9500     # after clearing baselineYield on `pool`
+gh workflow run harvest.yml -f baseline_reset=true   # relearn via the guarded path
 ```
 
 `HARVEST_BASELINE_RESET=1` makes the run treat the stored baseline as absent, so it learns

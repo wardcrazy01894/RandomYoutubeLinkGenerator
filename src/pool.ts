@@ -62,7 +62,8 @@ export async function loadManifest(): Promise<Manifest> {
 }
 
 /**
- * IDs the weekly sweep found gone or made private.
+ * IDs the re-validation sweep found gone or made private. (Run manually today;
+ * scheduling it is an open follow-up.)
  *
  * This was written by `scripts/revalidate.mjs` and deployed, but never fetched — so the
  * sweep that docs/DESIGN.md §5.3 calls the primary safety mechanism produced output no
