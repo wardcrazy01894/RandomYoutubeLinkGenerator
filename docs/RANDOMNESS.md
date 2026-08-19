@@ -109,6 +109,7 @@ That is the honest texture of the platform, and it is the point of the site. It 
 a uniform draw will sometimes surface ordinary people — often children — who never
 anticipated an audience. So the site never autoplays, defaults to excluding age-restricted
 material, holds newly uploaded videos back for 30 days while moderation catches up,
-re-validates the pool weekly, and offers a report control on every draw.
+re-validates the pool weekly, and offers a control on every draw that hides a video for
+you — and files a report too, when a contact address is configured.
 
 None of that makes the pool "safe". It makes it _considered_.

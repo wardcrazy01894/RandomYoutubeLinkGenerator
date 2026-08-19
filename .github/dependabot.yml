@@ -17,9 +17,9 @@ updates:
       npm-minor-and-patch:
         patterns: ['*']
         update-types: [minor, patch]
-    # Majors the rest of the toolchain cannot accept yet: proposed, tested against the
-    # full gate set, and found to break the build. Re-check when typescript-eslint ships
-    # support. (@eslint/js was here too until eslint 10 landed and unblocked it.)
+    # Majors held back for two different reasons: typescript 7 breaks the build outright
+    # (tested against the full gate set), while @types/node must simply track the runtime.
+    # (@eslint/js was here too until eslint 10 landed and unblocked it.)
     ignore:
       # @types/node must track the RUNTIME, not npm's latest. .nvmrc is 22, and
       # tsconfig has no `types` array, so these typings are ambient across src and
@@ -34,7 +34,7 @@ updates:
       # Version-scoped, not type-scoped: `update-types: semver-major` also silenced
       # TS 6, which typescript-eslint 8 supports today (peer: >=4.8.4 <6.1.0). The bound
       # is >=7 rather than >=6.1 deliberately: 6.1+ merely falls outside that peer range,
-      # which npm reports as a warning and CI would catch, whereas 7 makes
+      # which npm surfaces loudly at install (ERESOLVE) so CI catches it, whereas 7 makes
       # typescript-eslint hard-error on load and take `npm run lint` with it.
       - dependency-name: typescript
         versions: ['>=7']

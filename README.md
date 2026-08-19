@@ -38,7 +38,8 @@ audience. So the site:
 - **defaults to excluding** age-restricted videos (toggle in the footer)
 - **holds back** videos uploaded in the last 30 days, while moderation catches up
 - **re-validates weekly**, dropping anything removed or made private
-- offers a **report** control on every draw
+- offers a **report** control on every draw — it always hides the video for you, and
+  additionally files a report when a contact address is configured (`VITE_REPORT_EMAIL`)
 
 This is considered, not safe. See [`docs/RANDOMNESS.md`](docs/RANDOMNESS.md) §6.
 

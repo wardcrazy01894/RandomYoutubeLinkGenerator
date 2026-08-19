@@ -16,7 +16,14 @@ const MAX_AUTO_ADVANCE = 5
 const DEAD_LIST_CAP = 2000
 const DEAD_KEY = 'ryl.dead.v1'
 const STALE_AFTER_DAYS = 3
-const REPORT_TO = import.meta.env.VITE_REPORT_EMAIL ?? ''
+// Validated once rather than encoded. encodeURIComponent would turn '@' into '%40',
+// which RFC 6068 does not permit in the addr-spec (the '@' must be literal; a
+// pct-encoded local-part like '%2B' for '+' is fine, so plus-aliases survive either
+// way). Validating instead means a malformed repo variable degrades to the honest
+// hide-only path rather than shipping a mailto no client can use.
+const REPORT_ADDRESS_RE = /^[^\s@,?&]+@[^\s@,?&]+\.[^\s@,?&]+$/
+const RAW_REPORT_TO = import.meta.env.VITE_REPORT_EMAIL ?? ''
+const REPORT_TO = REPORT_ADDRESS_RE.test(RAW_REPORT_TO) ? RAW_REPORT_TO : ''
 
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T
@@ -187,9 +194,7 @@ function report(): void {
     const body = encodeURIComponent(
       `Video: https://www.youtube.com/watch?v=${current.id}\nTitle: ${current.t}\n\nWhy this should be removed from the pool:\n`,
     )
-    // The address is encoded too: a repo variable containing a space, ? or & would
-    // otherwise yield a malformed URL or inject mail headers.
-    window.location.href = `mailto:${encodeURIComponent(REPORT_TO)}?subject=${subject}&body=${body}`
+    window.location.href = `mailto:${REPORT_TO}?subject=${subject}&body=${body}`
     showBanner(
       'Thanks — that video is hidden for you, and your report is ready to send.',
     )
