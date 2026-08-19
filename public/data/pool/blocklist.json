@@ -1,1 +1,1 @@
-{"ids": [], "note": "Video IDs removed from the pool on report or review. Filtered at draw time and honoured by the revalidation sweep."}
+{"ids": [], "note": "Video IDs removed from the pool on report or review. Filtered at draw time by the client. The revalidation sweep skips these ids to save quota but never writes them to tombstones.json — folding them in would make un-blocklisting impossible, since main restores this file but nothing restores tombstones."}

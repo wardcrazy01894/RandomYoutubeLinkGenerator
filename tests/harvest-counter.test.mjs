@@ -37,6 +37,7 @@ export class ApiKeyError extends Error {}
 export const sleep = () => Promise.resolve()
 let calls = 0
 const failAt = Number(process.env.STUB_FAIL_AT ?? 0)
+const failAll = process.env.STUB_FAIL_ALL === '1'
 const quotaAt = Number(process.env.STUB_QUOTA_AT ?? 0)
 const perBucket = Number(process.env.STUB_PER_BUCKET ?? 2)
 export async function searchPage(key, q) {
@@ -44,6 +45,7 @@ export async function searchPage(key, q) {
   if (q === 'my8exz') return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
   calls++
   if (quotaAt && calls === quotaAt) throw new QuotaExceeded('stub quota')
+  if (failAll) throw new Error('stub total outage')
   if (failAt && calls === failAt) throw new Error('stub 503')
   appendFileSync(process.env.STUB_LOG, q + '\\n')
   const ids = []
@@ -159,13 +161,18 @@ describe('harvest counter', () => {
     const s = state()
     assertNoGaps(0, s.counter)
     // The failure is at the 3rd bucket, so at most the first two may be consumed.
-    expect(s.counter).toBeLessThanOrEqual(2)
+    // Exact, not a bound: `<= 2` is satisfied by 0, so a harvester that queried
+    // nothing would pass. The failure is at the 3rd bucket, so exactly two are consumed.
+    expect(s.counter).toBe(2)
   })
 
   // The round-four bug: freezing the counter while still harvesting poisoned the next
   // run's yield. Nothing may be committed against a frozen counter.
   it('stops issuing fresh queries once a bucket has failed', () => {
-    run({ HARVEST_UNITS: '3000', STUB_FAIL_AT: '2' })
+    const r = run({ HARVEST_UNITS: '3000', STUB_FAIL_AT: '2' })
+    // Exit code asserted too: `queried().length <= 1` is satisfied by 0, so without this
+    // the test passed even when the harvester crashed before issuing any query.
+    expect(r.code, r.out).toBe(0)
     expect(queried().length).toBeLessThanOrEqual(1)
   })
 
@@ -175,6 +182,45 @@ describe('harvest counter', () => {
     const s = state()
     assertNoGaps(0, s.counter)
     expect(s.counter).toBe(queried().length)
+  })
+})
+
+describe('total API outage', () => {
+  // The alarm was guarded by `bucketsDone > 0`, so when EVERY search throws — zero
+  // buckets complete — it was skipped and the run exited 0 forever. `freshHole`
+  // distinguishes "buckets failed" from "no budget was available".
+  it('alarms when every search fails and no bucket completes', () => {
+    seed({ baselineYield: 3 })
+    const r = run({ HARVEST_UNITS: '9000', STUB_FAIL_ALL: '1' })
+    expect(r.code, 'a total outage must never report ok').toBe(1)
+    const h = manifest().health
+    expect(h.status).toBe('no-fresh-progress')
+    expect(h.buckets).toBe(0)
+  })
+
+  // ...but the quota-capped ending also completes zero buckets, and IS normal. Without
+  // !quotaHit the new disjunct would turn every quota-exhausted night into an alarm.
+  it('stays quiet when a generic failure is followed by quota exhaustion', () => {
+    seed({ baselineYield: 3 })
+    // A non-zero counter is what makes re-harvest entries exist. Without them the loop
+    // ends the moment the fresh plan is abandoned, so quota is never reached and this
+    // would exercise the outage path instead of the one it names.
+    writeFileSync(
+      join(pool, 'state.json'),
+      JSON.stringify({
+        counter: 400,
+        reharvestCursor: 0,
+        sweeps: 0,
+        totalBuckets: 400,
+      }),
+    )
+    const r = run({
+      HARVEST_UNITS: '9000',
+      STUB_FAIL_AT: '1',
+      STUB_QUOTA_AT: '2',
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(manifest().health.status).toBe('ok-quota-capped')
   })
 })
 
@@ -259,6 +305,9 @@ describe('baseline escape hatch and truncation', () => {
     seed({ baselineYield: 5 })
     const r = run({ HARVEST_UNITS: '2600', STUB_PER_BUCKET: '1' })
     expect(r.code).toBe(1)
+    // Asserts the STATUS too: baselineYield alone is the seeded value, so this test
+    // passed even when the harvester crashed before running.
+    expect(manifest().health.status).toBe('yield-collapsed')
     expect(manifest().health.baselineYield).toBe(5)
   })
 })
@@ -277,6 +326,9 @@ describe('escape hatch cannot be turned into a silencer', () => {
       r.code,
       'a collapsed run must still fail with the hatch set to 0',
     ).toBe(1)
+    // Asserts the STATUS too: baselineYield alone is the seeded value, so this test
+    // passed even when the harvester crashed before running.
+    expect(manifest().health.status).toBe('yield-collapsed')
     expect(manifest().health.baselineYield).toBe(5)
   })
 
@@ -288,6 +340,9 @@ describe('escape hatch cannot be turned into a silencer', () => {
       HARVEST_BASELINE_RESET: 'false',
     })
     expect(r.code).toBe(1)
+    // Asserts the STATUS too: baselineYield alone is the seeded value, so this test
+    // passed even when the harvester crashed before running.
+    expect(manifest().health.status).toBe('yield-collapsed')
     expect(manifest().health.baselineYield).toBe(5)
   })
 

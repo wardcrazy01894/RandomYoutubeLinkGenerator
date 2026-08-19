@@ -30,7 +30,10 @@ export interface Manifest {
     status: string
     lastRunUtc: string | null
     buckets: number
+    /** New videos per FRESH bucket. Re-harvest buckets are excluded deliberately. */
     yield: number | null
+    /** Overall yield across fresh AND re-harvest buckets — diagnosis only. */
+    yieldAll?: number
     /** Threshold the yield gate compares against. Only healthy, untruncated runs move it. */
     baselineYield?: number | null
     /** Run shape: distinguishes a complete run from one that abandoned its fresh plan. */
@@ -59,7 +62,8 @@ export async function loadManifest(): Promise<Manifest> {
 }
 
 /**
- * IDs the weekly sweep found gone or made private.
+ * IDs the re-validation sweep found gone or made private. (Run manually today;
+ * scheduling it is an open follow-up.)
  *
  * This was written by `scripts/revalidate.mjs` and deployed, but never fetched — so the
  * sweep that docs/DESIGN.md §5.3 calls the primary safety mechanism produced output no

@@ -52,6 +52,19 @@ The key was deleted, rotated, restricted too tightly, or the YouTube Data API wa
 on the Cloud project. Check the key restrictions allow **YouTube Data API v3**, then update
 the `YOUTUBE_API_KEY` repository secret.
 
+### "not one of the N planned fresh buckets completed"
+
+Status `no-fresh-progress`. The sampling frontier is not advancing: every fresh bucket the
+run attempted failed, so `state.counter` did not move and nothing was published. This is
+the alarm for the case that has no yield to measure — it exists because gating only on
+yield left exactly this scenario reporting `ok` night after night.
+
+Usually one prefix at the frontier is failing persistently. `lib/youtube.mjs` already
+retries 429/5xx five times with backoff and throws immediately on other 4xx, so a failure that
+reaches here is not a blip. Check the run log for the `bucket <prefix> failed:` line and
+the status code behind it. A quota-capped run reports `ok-quota-capped` instead and is
+never this.
+
 ### "yield … below half the baseline"
 
 Videos per bucket collapsed. Either search coverage changed, or the API started filtering.
@@ -80,14 +93,16 @@ have looked at the numbers and accepted a new normal, relearn the baseline expli
 
 ```bash
 HARVEST_BASELINE_RESET=1 npm run harvest      # locally, or
-gh workflow run harvest.yml -f units=9500     # after clearing baselineYield on `pool`
+gh workflow run harvest.yml -f baseline_reset=true   # relearn via the guarded path
 ```
 
 `HARVEST_BASELINE_RESET=1` makes the run treat the stored baseline as absent, so it learns
 from this run instead of being measured against the old one. It must be exactly `1`: any
 other value, including `0`, leaves the gate armed — writing `HARVEST_BASELINE_RESET=0`
 must not be a way to silently disable the alarm. If the run is too small to relearn
-(under 20 buckets) it keeps the stored baseline and says so, rather than erasing it.
+(under 20 buckets) **or truncated** — meaning it abandoned its fresh plan after a bucket
+failed — it keeps the stored baseline and says so, rather than erasing it. Check
+`manifest.health.truncated` if a reset appears not to have taken.
 
 Use it deliberately, never on a schedule — on a schedule it reintroduces exactly the bug
 it replaced.
@@ -160,7 +175,8 @@ Run it against the live pool instead, using the `POOL_DIR` override so nothing h
 copied back and forth:
 
 The sweep refuses to write if a single run would remove more than 20% of what it checked
-(or if nothing at all survived) — a `videos.list` response of HTTP 200 with an empty
+— provided the removal count also clears a small floor that scales with the pool, so two
+genuine deletions on a young pool are not blocked — or if nothing at all survived — a `videos.list` response of HTTP 200 with an empty
 `items` array is neither a quota error nor a key error, and would otherwise tombstone the
 whole pool permanently. If a large cleanup really is legitimate, re-run with
 `ALLOW_MASS_REMOVAL=1`.

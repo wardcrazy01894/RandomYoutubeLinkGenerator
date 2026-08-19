@@ -179,7 +179,9 @@ for (const { n, fresh } of plan) {
     // An unexhausted bucket still counts: it was queried and deliberately rejected,
     // so retrying it forever would stall the counter behind one bad prefix.
     if (fresh) {
-      if (!freshHole) freshAttempted++
+      // freshHole is impossible here: the loop `continue`s every fresh entry once it is
+      // set, and nothing can set it during the await above.
+      freshAttempted++
     } else {
       // The re-harvest cursor tolerates holes: a skipped bucket simply comes back one
       // rotation later, so it needs no contiguity rule.
@@ -277,7 +279,12 @@ const baseline = BASELINE_RESET
 // cannot see it, and gating on freshAttempted made that case permanently silent: counter
 // frozen, nothing published, "ok" reported every night. Excludes the quota-capped and
 // no-budget endings, which are normal.
-if (freshCount > 0 && freshAttempted === 0 && !quotaHit && bucketsDone > 0) {
+if (
+  freshCount > 0 &&
+  freshAttempted === 0 &&
+  !quotaHit &&
+  (bucketsDone > 0 || freshHole)
+) {
   console.error(
     `FATAL: ${bucketsDone} buckets ran but not one of the ${freshCount} planned fresh ` +
       `buckets completed. The sampling frontier is not advancing.`,

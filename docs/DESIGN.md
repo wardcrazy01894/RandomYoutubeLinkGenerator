@@ -351,7 +351,7 @@ non-embeddable videos. A clearly-labelled opt-out lifts both, with a persistent 
 stating the draw is no longer the default frame.
 
 Three exclusions are **not** governed by that toggle and always apply: the maintainer's
-`blocklist.json`, `tombstones.json` (videos the weekly sweep found deleted or made
+`blocklist.json`, `tombstones.json` (videos the re-validation sweep found deleted or made
 private), and videos the viewer has hidden in their own browser. All three are permanent
 states rather than preferences, which is why the toggle does not reach them — and it is
 also why the sweep tombstones _only_ those states, never embeddability or age-restriction,
