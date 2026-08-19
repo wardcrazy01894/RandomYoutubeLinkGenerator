@@ -28,22 +28,40 @@ import {
 } from './lib/pool.mjs'
 import { loadKey } from './lib/env.mjs'
 
-const UNIT_BUDGET = Number(process.env.HARVEST_UNITS) || 9500
+/**
+ * Env numbers, parsed so that an explicit 0 survives and an empty/garbage value does not.
+ * `Number(x ?? d)` treats '' as 0; `Number(x) || d` throws away a deliberate 0. Both were
+ * wrong here: the first would mean zero pacing (429s), the second silently ignored the
+ * HARVEST_PACING_MS=0 the tests set.
+ */
+const envNum = (raw, fallback) => {
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : fallback
+}
+
+const UNIT_BUDGET = envNum(process.env.HARVEST_UNITS, 9500)
 const REHARVEST_SHARE = 0.3 // fraction of buckets spent re-drawing old ones (§3.3.5)
 // Safety quarantine keyed on UPLOAD age, not harvest age (docs/DESIGN.md §5.3).
 // YouTube's moderation lag applies to freshly uploaded videos; a 2019 upload gains
 // nothing from sitting a week just because we happened to draw it today. Keying on
 // harvest date would also have left the site empty for its first week.
 const MIN_UPLOAD_AGE_DAYS = 30
-const PACING_MS = Number(process.env.HARVEST_PACING_MS) || 350 // per-minute rate limit
+const PACING_MS = envNum(process.env.HARVEST_PACING_MS, 350) // per-minute rate limit
 const MAX_PAGES = 3 // a k=5 bucket needing >150 results is anomalous; drop it
 const YIELD_FLOOR_RATIO = 0.5 // run-level yield below half baseline is fatal
 // Deliberately relearn the baseline instead of being measured against the stored one.
 // Must apply to BOTH the gate and recordHealth: applying it only to the latter would
 // leave the gate failing against the old baseline and exiting before writeState, so
 // nothing would ever be relearned. See docs/OPERATIONS.md.
-const BASELINE_RESET = Boolean(process.env.HARVEST_BASELINE_RESET)
-const FEISTEL_KEY = process.env.HARVEST_KEY ?? 'RandomYoutubeLinkGenerator/v1'
+// Strictly '1'. Boolean() treated '0' and 'false' as ON, so the most natural way to
+// write "off" silently disabled the yield gate and relearned the baseline from a
+// collapsed run — the exact self-silencing this whole change exists to remove.
+const BASELINE_RESET = process.env.HARVEST_BASELINE_RESET === '1'
+// `??` let HARVEST_KEY='' through literally, silently re-keying the Feistel permutation
+// while state.counter kept advancing — a different prefix sequence over the same counter,
+// which is the frame-shrinking P0 this file warns about below.
+const FEISTEL_KEY = process.env.HARVEST_KEY || 'RandomYoutubeLinkGenerator/v1'
 
 // A known dash-token ID. If this stops resolving, YouTube changed the tokenizer and
 // every downstream number is meaningless — this is the one check that catches it.
@@ -241,7 +259,15 @@ if (found.size > 0 && remaining() > 0) {
 const baseline = BASELINE_RESET
   ? null
   : (manifest.health?.baselineYield ?? null)
-if (baseline && bucketsDone >= 20 && yieldPer < baseline * YIELD_FLOOR_RATIO) {
+// Gate on FRESH buckets, not all of them. A truncated run is mostly re-harvest buckets
+// that legitimately return nothing new, so measuring it against the baseline generated a
+// routine false alarm — and the naive fix (skip the gate when truncated) would instead go
+// silent exactly when every fresh bucket failed.
+if (
+  baseline &&
+  freshAttempted >= 20 &&
+  yieldPer < baseline * YIELD_FLOOR_RATIO
+) {
   console.error(
     `FATAL: yield ${yieldPer.toFixed(2)}/bucket is below half the ${baseline.toFixed(2)} baseline.`,
   )
@@ -319,7 +345,8 @@ function recordHealth(status, buckets, y, extra = {}) {
   // itself: a collapsed run now exits before writeState, so the same night repeats
   // forever. That is correct — an alarm must not silence itself — but the operator needs
   // a deliberate way to accept a new normal. See docs/OPERATIONS.md.
-  const prior = BASELINE_RESET ? null : (manifest.health?.baselineYield ?? null)
+  const stored = manifest.health?.baselineYield ?? null
+  const prior = BASELINE_RESET ? null : stored
   // ONLY a healthy run may move the baseline. Folding a collapsed yield into it made the
   // gate self-silencing: each failed night dragged the baseline toward the broken value
   // (4.5 -> 3.7 -> ... -> 1.2), and once it fell below the residual yield the run started
@@ -332,19 +359,25 @@ function recordHealth(status, buckets, y, extra = {}) {
   // 'ok' rather than via failure.
   const healthy =
     (status === 'ok' || status === 'ok-quota-capped') && !freshHole
+  const canLearn = healthy && y != null && buckets >= 20
+  if (BASELINE_RESET && !canLearn) {
+    console.warn(
+      `HARVEST_BASELINE_RESET was set, but this run cannot relearn a baseline ` +
+        `(${buckets} buckets, status "${status}"). Keeping the stored value rather than ` +
+        `erasing it — re-run with a full budget to make the reset take effect.`,
+    )
+  }
   manifest.health = {
+    ...extra,
     status,
     lastRunUtc: runStarted.toISOString(),
     buckets,
     yield: y,
-    // Slow-moving so the gate adapts to real drift rather than firing on noise.
-    baselineYield:
-      healthy && y != null && buckets >= 20
-        ? prior
-          ? prior * 0.8 + y * 0.2
-          : y
-        : prior,
-    ...extra,
+    // Slow-moving so the gate adapts to real drift rather than firing on noise. When a
+    // run cannot learn, the STORED value is kept rather than `prior` — otherwise a reset
+    // on a run too small to relearn would erase the baseline and leave the gate off
+    // until some later run happened to rebuild it unattended.
+    baselineYield: canLearn ? (prior ? prior * 0.8 + y * 0.2 : y) : stored,
   }
   writeManifest(manifest)
 }

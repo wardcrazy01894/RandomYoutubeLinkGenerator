@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import {
   mkdtempSync,
   rmSync,
@@ -60,27 +60,25 @@ export async function videosMeta(key, ids) {
 `
 
 function run(env = {}) {
-  try {
-    const stdout = execFileSync('node', [join(dir, 'harvest.mjs')], {
-      env: {
-        ...process.env,
-        YOUTUBE_API_KEY: 'stub',
-        POOL_DIR: pool,
-        HARVEST_PACING_MS: '0',
-        // Pinned: an ambient HARVEST_KEY would otherwise change the prefix order and
-        // surface as a confusing "counted but never queried" failure.
-        HARVEST_KEY: KEY,
-        STUB_LOG: log,
-        ...env,
-      },
-      encoding: 'utf8',
-    })
-    return { code: 0, out: stdout }
-  } catch (err) {
-    return {
-      code: err.status ?? 1,
-      out: `${err.stdout ?? ''}${err.stderr ?? ''}`,
-    }
+  // spawnSync rather than execFileSync: the latter returns only stdout, and only on
+  // success, so console.warn output was invisible to assertions on a passing run.
+  const res = spawnSync('node', [join(dir, 'harvest.mjs')], {
+    env: {
+      ...process.env,
+      YOUTUBE_API_KEY: 'stub',
+      POOL_DIR: pool,
+      HARVEST_PACING_MS: '0',
+      // Pinned: an ambient HARVEST_KEY would otherwise change the prefix order and
+      // surface as a confusing "counted but never queried" failure.
+      HARVEST_KEY: KEY,
+      STUB_LOG: log,
+      ...env,
+    },
+    encoding: 'utf8',
+  })
+  return {
+    code: res.status ?? 1,
+    out: `${res.stdout ?? ''}${res.stderr ?? ''}`,
   }
 }
 
@@ -261,5 +259,73 @@ describe('baseline escape hatch and truncation', () => {
     const r = run({ HARVEST_UNITS: '2600', STUB_PER_BUCKET: '1' })
     expect(r.code).toBe(1)
     expect(manifest().health.baselineYield).toBe(5)
+  })
+})
+
+describe('escape hatch cannot be turned into a silencer', () => {
+  // Boolean('0') is true, so HARVEST_BASELINE_RESET=0 — the most natural way to write
+  // "off" — disabled the gate and relearned the baseline from a collapsed run.
+  it('treats HARVEST_BASELINE_RESET=0 as OFF, leaving the gate armed', () => {
+    seed({ baselineYield: 5 })
+    const r = run({
+      HARVEST_UNITS: '2600',
+      STUB_PER_BUCKET: '1',
+      HARVEST_BASELINE_RESET: '0',
+    })
+    expect(
+      r.code,
+      'a collapsed run must still fail with the hatch set to 0',
+    ).toBe(1)
+    expect(manifest().health.baselineYield).toBe(5)
+  })
+
+  it('ignores any value that is not exactly 1', () => {
+    seed({ baselineYield: 5 })
+    const r = run({
+      HARVEST_UNITS: '2600',
+      STUB_PER_BUCKET: '1',
+      HARVEST_BASELINE_RESET: 'false',
+    })
+    expect(r.code).toBe(1)
+    expect(manifest().health.baselineYield).toBe(5)
+  })
+
+  // A reset on a run too small to relearn used to write null, leaving the gate off until
+  // some later run rebuilt it unattended.
+  it('keeps the stored baseline when the run is too small to relearn', () => {
+    seed({ baselineYield: 5 })
+    const r = run({
+      HARVEST_UNITS: '600',
+      STUB_PER_BUCKET: '4',
+      HARVEST_BASELINE_RESET: '1',
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(manifest().health.baselineYield, 'must not be erased').toBe(5)
+    expect(r.out).toMatch(/cannot relearn a baseline/i)
+  })
+
+  // The gate measures FRESH buckets: a truncated run is mostly re-harvest buckets that
+  // legitimately return little, so measuring it against the baseline false-alarms.
+  it('does not fire the yield gate on a run with almost no fresh buckets', () => {
+    seed({ baselineYield: 5 })
+    writeFileSync(
+      join(pool, 'state.json'),
+      JSON.stringify({
+        counter: 400,
+        reharvestCursor: 0,
+        sweeps: 0,
+        totalBuckets: 400,
+      }),
+    )
+    const r = run({
+      HARVEST_UNITS: '9000',
+      STUB_FAIL_AT: '1',
+      STUB_PER_BUCKET: '0',
+    })
+    expect(
+      r.code,
+      'a truncated run must not be judged against the full baseline',
+    ).toBe(0)
+    expect(manifest().health.truncated).toBe(true)
   })
 })

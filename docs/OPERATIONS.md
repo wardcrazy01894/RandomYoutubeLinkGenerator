@@ -69,9 +69,12 @@ the publish step is skipped and the mutated manifest is discarded. It was reacha
 local `npm run harvest`, whose output a human then commits — and the guard is worth having
 regardless.)
 
-**The trade-off, and the escape hatch.** Because a collapsed run exits before `writeState`,
-nothing about it persists — so if the yield has genuinely and permanently changed, every
-subsequent night fails identically and the pool stops growing. That is deliberate: an alarm
+**The trade-off, and the escape hatch.** A collapsed run exits before `writeState`, so the
+sampling counter does not advance and no videos are published — in CI the whole run fails,
+so nothing reaches the `pool` branch at all. (Locally it does rewrite `manifest.json` with
+the failed status, which will show up in `git status`.) If the yield has genuinely and
+permanently changed, every subsequent night therefore fails identically and the pool stops
+growing. That is deliberate: an alarm
 that quietly re-baselines itself is the failure this project is built to avoid. When you
 have looked at the numbers and accepted a new normal, relearn the baseline explicitly:
 
@@ -81,8 +84,13 @@ gh workflow run harvest.yml -f units=9500     # after clearing baselineYield on 
 ```
 
 `HARVEST_BASELINE_RESET=1` makes the run treat the stored baseline as absent, so it learns
-from this run instead of being measured against the old one. Use it deliberately, never on
-a schedule — on a schedule it reintroduces exactly the bug it replaced.
+from this run instead of being measured against the old one. It must be exactly `1`: any
+other value, including `0`, leaves the gate armed — writing `HARVEST_BASELINE_RESET=0`
+must not be a way to silently disable the alarm. If the run is too small to relearn
+(under 20 buckets) it keeps the stored baseline and says so, rather than erasing it.
+
+Use it deliberately, never on a schedule — on a schedule it reintroduces exactly the bug
+it replaced.
 
 ### The run says `ok` but the pool barely grew
 
