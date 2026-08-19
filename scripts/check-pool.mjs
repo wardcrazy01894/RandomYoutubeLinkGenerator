@@ -7,7 +7,13 @@
 
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { readManifest, readShard, POOL_DIR, SHARD_SIZE } from './lib/pool.mjs'
+import {
+  readManifest,
+  readShard,
+  readTombstones,
+  POOL_DIR,
+  SHARD_SIZE,
+} from './lib/pool.mjs'
 
 const problems = []
 const fail = (msg) => problems.push(msg)
@@ -105,6 +111,20 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  - ${p}`)
   process.exit(1)
 }
+// Tombstones are fetched by every visitor, so an unbounded list reintroduces exactly the
+// linearly-growing per-page-load download the fixed-size shard scheme exists to avoid
+// (docs/DESIGN.md §4.1). ~5,000 ids is roughly 93 KB raw / 47 KB gzipped — about 15x the
+// whole app bundle — which is where repacking dead ids out of the shards starts to pay.
+const REPACK_THRESHOLD = 5000
+const tombstoned = readTombstones().ids?.length ?? 0
+if (tombstoned > REPACK_THRESHOLD) {
+  console.warn(
+    `WARNING: ${tombstoned} tombstones (> ${REPACK_THRESHOLD}). Every visitor downloads ` +
+      `this list; consider repacking dead ids out of the shards. See docs/DESIGN.md §4.1.`,
+  )
+}
+
 console.log(
-  `Pool OK: ${counted} records across ${shardFiles.length} shard(s), ${manifest.servable} servable.`,
+  `Pool OK: ${counted} records across ${shardFiles.length} shard(s), ` +
+    `${manifest.servable} servable, ${tombstoned} tombstoned.`,
 )

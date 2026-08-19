@@ -350,8 +350,12 @@ The default view excludes age-restricted (`contentDetails.contentRating.ytRating
 non-embeddable videos. A clearly-labelled opt-out lifts both, with a persistent banner
 stating the draw is no longer the default frame.
 
-Two exclusions are **not** governed by that toggle and always apply: the maintainer's
-`blocklist.json`, and videos the viewer has hidden in their own browser. So the opt-out
+Three exclusions are **not** governed by that toggle and always apply: the maintainer's
+`blocklist.json`, `tombstones.json` (videos the weekly sweep found deleted or made
+private), and videos the viewer has hidden in their own browser. All three are permanent
+states rather than preferences, which is why the toggle does not reach them — and it is
+also why the sweep tombstones _only_ those states, never embeddability or age-restriction,
+which the toggle does govern. So the opt-out
 widens the frame; it does not make the draw unfiltered, and the banner says so. The
 exclusion rates are reported by `npm run pool-stats` — they are interesting statistics in
 their own right.

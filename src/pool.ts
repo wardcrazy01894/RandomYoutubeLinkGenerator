@@ -62,7 +62,10 @@ export async function loadTombstones(): Promise<string[]> {
   try {
     const res = await fetch(`${base}/tombstones.json`, { cache: 'no-cache' })
     if (!res.ok) return []
-    return (await res.json()).ids ?? []
+    const ids = (await res.json())?.ids
+    // Shape-checked: a malformed `ids` (a string, say) would otherwise spread into the
+    // exclusion Set one character at a time.
+    return Array.isArray(ids) ? ids : []
   } catch {
     return []
   }
