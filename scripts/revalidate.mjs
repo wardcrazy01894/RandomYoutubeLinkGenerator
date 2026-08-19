@@ -2,8 +2,10 @@
 // Weekly re-validation sweep. docs/DESIGN.md §5.3.
 //
 // This is the pool's primary SAFETY mechanism, not just staleness hygiene: videos that
-// YouTube has removed, made private, or age-restricted since we harvested them stop
-// being served. `videos.list` costs 1 unit per 50 IDs, so sweeping the whole pool is
+// YouTube has removed or made private since we harvested them stop being served.
+// Age-restriction and embeddability are deliberately NOT swept — they are governed by the
+// safe-mode toggle, and tombstoning them would convert a filter the viewer can lift into
+// a removal they cannot. See the dead-detection block below. `videos.list` costs 1 unit per 50 IDs, so sweeping the whole pool is
 // nearly free — a 100k pool costs 2,000 of 10,000 daily units.
 //
 // Shards are immutable, so removals are recorded in tombstones.json rather than edited
@@ -93,17 +95,27 @@ try {
 // is neither QuotaExceeded nor ApiKeyError, and would mark every id checked as 'gone'.
 // Tombstones are also never re-checked, so a false mass-tombstone is permanent.
 const MAX_REMOVAL_RATIO = 0.2
+// Deliberate override for a genuinely large cleanup, so a >20% removal cannot wedge the
+// sweep forever (every later run would re-check the same records and refuse again).
+const ALLOW_MASS_REMOVAL = process.env.ALLOW_MASS_REMOVAL === '1'
 // A minimum sample before the ratio means anything: on an early pool of a dozen records,
 // two genuine deletions are 17% and would trip a percentage guard for no reason.
 const MIN_SAMPLE_FOR_RATIO = 50
+// `dead === checked` is refused unconditionally, floor or no floor: a sweep in which
+// NOTHING survived is a bad response, not a pool that vanished. The ratio floor alone
+// left a 49-record pool wipeable in a single run.
+const wipedEverything = checked > 0 && dead.length === checked
 if (
-  checked >= MIN_SAMPLE_FOR_RATIO &&
-  dead.length / checked > MAX_REMOVAL_RATIO
+  !ALLOW_MASS_REMOVAL &&
+  (wipedEverything ||
+    (checked >= MIN_SAMPLE_FOR_RATIO &&
+      dead.length / checked > MAX_REMOVAL_RATIO))
 ) {
   console.error(
     `REFUSING: this sweep would tombstone ${dead.length} of ${checked} checked videos ` +
       `(>${MAX_REMOVAL_RATIO * 100}%). That is far more likely to be a bad API response ` +
-      `than reality, and tombstones are never re-checked. Nothing was written.`,
+      `than reality, and tombstones are never re-checked. Nothing was written. ` +
+      `If this really is a legitimate cleanup, re-run with ALLOW_MASS_REMOVAL=1.`,
   )
   process.exit(1)
 }

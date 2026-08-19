@@ -221,9 +221,9 @@ async function boot(): Promise<void> {
   try {
     ;[manifest, blocked] = await Promise.all([
       loadManifest(),
-      // Blocklist (maintainer removals) and tombstones (sweep findings: gone, private,
-      // or no longer embeddable) are both permanent exclusions, so they merge into one
-      // set. Tombstones were previously published and never read.
+      // Blocklist (maintainer removals) and tombstones (sweep findings: gone or made
+      // private) are both PERMANENT exclusions, so they merge into one set. Toggle-governed
+      // filters — age-restriction, embeddability — are deliberately not in here.
       Promise.all([loadBlocklist(), loadTombstones()]).then((lists) =>
         lists.flat(),
       ),
@@ -266,7 +266,7 @@ async function boot(): Promise<void> {
     els.banner.hidden = els.safe.checked
     if (!els.safe.checked) {
       showBanner(
-        'Age-restriction filtering is off. Blocklisted and locally-hidden videos are still excluded.',
+        'Age-restriction and embeddability filtering are off. Removed, blocklisted and locally-hidden videos are still excluded.',
       )
     }
   })
