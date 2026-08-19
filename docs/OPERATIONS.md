@@ -17,6 +17,15 @@ Everything here exists to make that loud.
 - **`main`** — protected. All changes via PR, required checks, no force-push.
 - **`pool`** — deliberately unprotected, force-pushed nightly by the harvester.
 
+The `pool` branch keeps a real commit per harvest (`harvest: pool at N videos`), so you
+can diff any two nights and `git revert` a bad run. To roll the served pool back, reset
+the branch to a known-good commit — the next deploy picks it up:
+
+```bash
+git push --force origin <good-sha>:pool
+gh workflow run deploy.yml --repo wardcrazy01894/RandomYoutubeLinkGenerator
+```
+
 `pool` exists because a `GITHUB_TOKEN`-created pull request does **not** fire
 `pull_request` events. A nightly PR would therefore never get its required checks
 reported and would be permanently unmergeable — 365 dead PRs a year and a pool that never
