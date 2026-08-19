@@ -31,6 +31,13 @@ export interface Manifest {
     lastRunUtc: string | null
     buckets: number
     yield: number | null
+    /** Threshold the yield gate compares against. Only healthy, untruncated runs move it. */
+    baselineYield?: number | null
+    /** Run shape: distinguishes a complete run from one that abandoned its fresh plan. */
+    freshPlanned?: number
+    freshAttempted?: number
+    reharvestAttempted?: number
+    truncated?: boolean
   }
   stats: Record<string, unknown>
 }
@@ -49,6 +56,26 @@ export async function loadManifest(): Promise<Manifest> {
   const res = await fetch(`${base}/manifest.json`, { cache: 'no-cache' })
   if (!res.ok) throw new Error(`manifest unavailable (${res.status})`)
   return res.json()
+}
+
+/**
+ * IDs the weekly sweep found gone or made private.
+ *
+ * This was written by `scripts/revalidate.mjs` and deployed, but never fetched — so the
+ * sweep that docs/DESIGN.md §5.3 calls the primary safety mechanism produced output no
+ * viewer ever saw, and videos YouTube had already removed kept being served.
+ */
+export async function loadTombstones(): Promise<string[]> {
+  try {
+    const res = await fetch(`${base}/tombstones.json`, { cache: 'no-cache' })
+    if (!res.ok) return []
+    const ids = (await res.json())?.ids
+    // Shape-checked: a malformed `ids` (a string, say) would otherwise spread into the
+    // exclusion Set one character at a time.
+    return Array.isArray(ids) ? ids : []
+  } catch {
+    return []
+  }
 }
 
 export async function loadBlocklist(): Promise<string[]> {

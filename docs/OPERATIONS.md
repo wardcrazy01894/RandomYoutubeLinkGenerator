@@ -58,6 +58,48 @@ Videos per bucket collapsed. Either search coverage changed, or the API started 
 Compare against `npm run pool-stats` history. A single bad night can be noise — two in a
 row is a real signal.
 
+A failed or truncated run **does not move** `manifest.health.baselineYield`. That matters:
+folding a collapsed yield into the baseline let the alarm lower its own threshold, so
+repeated failures would decay it (4.5 → 3.7 → … → 1.2) until a run reported `ok` while
+harvesting a fraction of its buckets. The threshold you are compared against is always the
+last healthy, untruncated one.
+
+(In CI this decay was not actually reachable: a `yield-collapsed` run exits non-zero, so
+the publish step is skipped and the mutated manifest is discarded. It was reachable from a
+local `npm run harvest`, whose output a human then commits — and the guard is worth having
+regardless.)
+
+**The trade-off, and the escape hatch.** A collapsed run exits before `writeState`, so the
+sampling counter does not advance and no videos are published — in CI the whole run fails,
+so nothing reaches the `pool` branch at all. (Locally it does rewrite `manifest.json` with
+the failed status, which will show up in `git status`.) If the yield has genuinely and
+permanently changed, every subsequent night therefore fails identically and the pool stops
+growing. That is deliberate: an alarm
+that quietly re-baselines itself is the failure this project is built to avoid. When you
+have looked at the numbers and accepted a new normal, relearn the baseline explicitly:
+
+```bash
+HARVEST_BASELINE_RESET=1 npm run harvest      # locally, or
+gh workflow run harvest.yml -f units=9500     # after clearing baselineYield on `pool`
+```
+
+`HARVEST_BASELINE_RESET=1` makes the run treat the stored baseline as absent, so it learns
+from this run instead of being measured against the old one. It must be exactly `1`: any
+other value, including `0`, leaves the gate armed — writing `HARVEST_BASELINE_RESET=0`
+must not be a way to silently disable the alarm. If the run is too small to relearn
+(under 20 buckets) it keeps the stored baseline and says so, rather than erasing it.
+
+Use it deliberately, never on a schedule — on a schedule it reintroduces exactly the bug
+it replaced.
+
+### The run says `ok` but the pool barely grew
+
+Check `manifest.health.truncated`. A run that hits a bucket failure abandons the rest of
+its fresh plan — deliberately, because committing records against a frozen counter
+poisons the next run's yield — so it can succeed with far fewer buckets than planned.
+`freshPlanned` vs `freshAttempted` shows how much was skipped. One such night is normal
+after a transient API error; several in a row means something is reliably failing.
+
 ### `quotaExceeded`
 
 Not a failure. The 10,000 unit/day cap is a hard stop with no charge attached; the run
@@ -116,6 +158,12 @@ that are silently discarded on the next harvest or deploy.
 
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
 copied back and forth:
+
+The sweep refuses to write if a single run would remove more than 20% of what it checked
+(or if nothing at all survived) — a `videos.list` response of HTTP 200 with an empty
+`items` array is neither a quota error nor a key error, and would otherwise tombstone the
+whole pool permanently. If a large cleanup really is legitimate, re-run with
+`ALLOW_MASS_REMOVAL=1`.
 
 ```bash
 git clone --branch pool --single-branch \

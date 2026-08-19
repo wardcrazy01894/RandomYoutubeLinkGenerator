@@ -73,8 +73,11 @@ Ordered by how much they should worry you.
    consistently since 2005. That is folklore, not a published fact. If the scheme changed,
    dash position could correlate with upload era — and era correlates with almost
    everything. We monitor the character distribution by upload year to detect it.
-4. **Embeddability.** We serve only embeddable videos, which excludes most major-label
-   music and many news organisations. Currently ~99% of harvested videos qualify, so the
+4. **Embeddability.** By default we serve only embeddable videos, which excludes most
+   major-label music and many news organisations. The footer toggle lifts this along with
+   age-restriction, so it is a default rather than a hard frame boundary — and the weekly
+   sweep deliberately does not tombstone non-embeddable videos, which would turn that
+   default into a permanent removal. Currently ~99% of harvested videos qualify, so the
    effect is small but real.
 5. **Unexhaustible buckets (~17%).** When a prefix happens to look like ordinary text
    (`ilfat`), it collides with thousands of title matches and the bucket cannot be
@@ -86,9 +89,11 @@ Ordered by how much they should worry you.
    they did not exist for earlier draws. A rolling fraction of each night's budget
    re-harvests older buckets to bound this.
 7. **Safety filtering (on by default).** The default view hides age-restricted and
-   non-embeddable videos; the footer toggle turns both off. Two exclusions are **not** covered by the toggle and
-   always apply: the maintainer's `blocklist.json`, and videos you have hidden yourself in
-   this browser. So the toggle widens the frame, it does not make it unfiltered.
+   non-embeddable videos; the footer toggle turns both off. Three exclusions are **not**
+   covered by the toggle and
+   always apply: the maintainer's `blocklist.json`, videos the weekly sweep found deleted
+   or made private (`tombstones.json`), and videos you have hidden yourself in this
+   browser. So the toggle widens the frame, it does not make it unfiltered.
 8. **Harvester locale.** Results are region- and language-conditioned; we pin `US`/`en`
    explicitly so the bias is fixed and stated rather than drifting.
 

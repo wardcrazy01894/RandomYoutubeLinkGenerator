@@ -35,9 +35,11 @@ A uniform sample of YouTube is mostly home video, including of people who never 
 audience. So the site:
 
 - **never autoplays** — a draw shows a title and a blurred thumbnail behind an explicit Play
-- **defaults to excluding** age-restricted videos (toggle in the footer)
+- **defaults to excluding** age-restricted and non-embeddable videos (toggle in the
+  footer)
 - **holds back** videos uploaded in the last 30 days, while moderation catches up
-- **re-validates weekly**, dropping anything removed or made private
+- **re-validates** the pool, dropping anything removed or made private (run manually
+  today — automating it is an open follow-up)
 - offers a control on every draw that hides the video for you in this browser (best
   effort — it needs local storage, and the list is capped), and additionally opens a
   prefilled report to send when a contact address is configured (`VITE_REPORT_EMAIL`)
