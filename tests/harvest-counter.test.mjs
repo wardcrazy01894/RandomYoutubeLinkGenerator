@@ -399,3 +399,40 @@ describe('escape hatch cannot be turned into a silencer', () => {
     expect(manifest().health.status).toBe('ok-quota-capped')
   })
 })
+
+// A budget below one bucket's worst-case cost produced a run that spent the canary's 100
+// units, harvested nothing, and exited 0 reporting "ok" — observed live at
+// HARVEST_UNITS=300. The plan sizes a bucket at one page (100), but the loop will not
+// START a bucket without MAX_PAGES+1 pages (400) in reserve, so it planned work it could
+// never run. That is the "succeeds while producing nothing" failure this project exists
+// to design against, so it is now fatal and detected before any API call.
+describe('budget floor', () => {
+  it('refuses a budget too small to start a single bucket', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '300' })
+    expect(r.code, 'a run that cannot harvest must not report success').toBe(1)
+    expect(r.out).toMatch(/cannot harvest anything/)
+  })
+
+  it('refuses before spending anything on the API', () => {
+    seed()
+    run({ HARVEST_UNITS: '300' })
+    expect(queried(), 'the check must precede even the canary').toEqual([])
+  })
+
+  it('names the minimum that would work', () => {
+    seed()
+    expect(run({ HARVEST_UNITS: '300' }).out).toMatch(
+      /minimum useful budget is 500/,
+    )
+  })
+
+  it('allows the smallest budget that can actually run a bucket', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '500' })
+    expect(r.code, '500 is exactly canary + one bucket reserve').toBe(0)
+    // The stub does not log the canary, so this counts real buckets. Exactly one fits:
+    // the first search leaves 300, below the 400 reserve, so the loop stops there.
+    expect(queried().length, 'the floor must permit exactly one bucket').toBe(1)
+  })
+})

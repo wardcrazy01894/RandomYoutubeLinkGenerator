@@ -101,6 +101,25 @@ let reharvestAttempted = 0
 let freshHole = false
 let freshNew = 0
 
+// The loop refuses to START a bucket without MAX_PAGES+1 searches in reserve, so that a
+// bucket it begins can always be paged to exhaustion — a partial bucket is truncated in
+// relevance order and would reintroduce popularity bias (§3.3.3). A budget below the
+// canary plus that reserve therefore cannot harvest anything at all: it spends the
+// canary's units and stops, every night, reporting success. Refuse up front instead.
+//
+// This is checked BEFORE the canary so a misconfigured budget costs nothing to detect.
+const BUCKET_RESERVE = COST.search * (MAX_PAGES + 1)
+const MIN_USEFUL_BUDGET = COST.search + BUCKET_RESERVE
+if (UNIT_BUDGET < MIN_USEFUL_BUDGET) {
+  console.error(
+    `FATAL: HARVEST_UNITS=${UNIT_BUDGET} cannot harvest anything. Starting one bucket ` +
+      `needs ${BUCKET_RESERVE} units in reserve (MAX_PAGES=${MAX_PAGES}) on top of the ` +
+      `canary's ${COST.search}, so the minimum useful budget is ${MIN_USEFUL_BUDGET}. ` +
+      `A smaller budget burns the canary and harvests zero buckets every run.`,
+  )
+  process.exit(1)
+}
+
 // --- canary -----------------------------------------------------------------
 // Deliberately uninitialised: every path through the catch below either exits the
 // process or rethrows, so a default value would never be observed.
@@ -150,8 +169,13 @@ for (let i = 0; i < reharvestCount; i++) {
     fresh: false,
   })
 }
+// `affordable` sizes a bucket at ONE page, which is what the large majority cost. The
+// loop needs BUCKET_RESERVE free to start one, so the last few planned entries routinely
+// go unrun; that is harmless, they are simply re-planned next run. Sizing the plan at the
+// reserve instead would leave three quarters of the budget unspent every night.
 console.log(
-  `plan: ${freshCount} fresh + ${reharvestCount} re-harvest buckets (${remaining()} units)`,
+  `plan: ${freshCount} fresh + ${reharvestCount} re-harvest buckets ` +
+    `(${remaining()} units, ${BUCKET_RESERVE} reserved per bucket started)`,
 )
 
 // --- harvest ----------------------------------------------------------------
