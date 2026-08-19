@@ -346,10 +346,15 @@ play it", and it is the cheapest, highest-leverage mitigation available.
 
 ### 5.2 Safe-by-default subset
 
-Default excludes age-restricted (`contentDetails.contentRating.ytRating`), non-embeddable,
-and blocklisted videos. A clearly-labelled opt-out serves the full uniform pool, with a
-persistent banner stating the draw is no longer the default frame. The exclusion rate is
-published — it is an interesting statistic in its own right.
+The default view excludes age-restricted (`contentDetails.contentRating.ytRating`) and
+non-embeddable videos. A clearly-labelled opt-out lifts both, with a persistent banner
+stating the draw is no longer the default frame.
+
+Two exclusions are **not** governed by that toggle and always apply: the maintainer's
+`blocklist.json`, and videos the viewer has hidden in their own browser. So the opt-out
+widens the frame; it does not make the draw unfiltered, and the banner says so. The
+exclusion rates are reported by `npm run pool-stats` — they are interesting statistics in
+their own right.
 
 This is stated plainly as a filter, **not a safety guarantee**. No automated signal
 identifies "home video of somebody's kids", and we do not pretend otherwise.

@@ -257,7 +257,7 @@ async function boot(): Promise<void> {
     els.banner.hidden = els.safe.checked
     if (!els.safe.checked) {
       showBanner(
-        'Age-restriction filtering is off. This is the full uniform pool, unfiltered.',
+        'Age-restriction filtering is off. Blocklisted and locally-hidden videos are still excluded.',
       )
     }
   })

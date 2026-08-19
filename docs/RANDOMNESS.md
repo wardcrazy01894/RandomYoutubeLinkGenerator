@@ -85,8 +85,8 @@ Ordered by how much they should worry you.
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
    they did not exist for earlier draws. A rolling fraction of each night's budget
    re-harvests older buckets to bound this.
-7. **Safety filtering (on by default).** The default view hides age-restricted videos;
-   the footer toggle turns that off. Two exclusions are **not** covered by the toggle and
+7. **Safety filtering (on by default).** The default view hides age-restricted and
+   non-embeddable videos; the footer toggle turns both off. Two exclusions are **not** covered by the toggle and
    always apply: the maintainer's `blocklist.json`, and videos you have hidden yourself in
    this browser. So the toggle widens the frame, it does not make it unfiltered.
 8. **Harvester locale.** Results are region- and language-conditioned; we pin `US`/`en`
