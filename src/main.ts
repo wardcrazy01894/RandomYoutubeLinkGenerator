@@ -182,15 +182,22 @@ async function play(): Promise<void> {
 function report(): void {
   if (!current) return
   markDead(current.id)
-  const subject = encodeURIComponent(`Report: ${current.id}`)
-  const body = encodeURIComponent(
-    `Video: https://www.youtube.com/watch?v=${current.id}\nTitle: ${current.t}\n\nWhy this should be removed from the pool:\n`,
-  )
-  if (REPORT_TO)
-    window.location.href = `mailto:${REPORT_TO}?subject=${subject}&body=${body}`
-  showBanner(
-    'Thanks — that video is now hidden for you and flagged for removal from the pool.',
-  )
+  if (REPORT_TO) {
+    const subject = encodeURIComponent(`Report: ${current.id}`)
+    const body = encodeURIComponent(
+      `Video: https://www.youtube.com/watch?v=${current.id}\nTitle: ${current.t}\n\nWhy this should be removed from the pool:\n`,
+    )
+    // The address is encoded too: a repo variable containing a space, ? or & would
+    // otherwise yield a malformed URL or inject mail headers.
+    window.location.href = `mailto:${encodeURIComponent(REPORT_TO)}?subject=${subject}&body=${body}`
+    showBanner(
+      'Thanks — that video is hidden for you, and your report is ready to send.',
+    )
+  } else {
+    // Never claim a report was filed when nothing was sent. The deployed bundle had no
+    // mailto at all, yet still showed the "flagged for removal" banner.
+    showBanner('That video is now hidden for you.')
+  }
   void draw()
 }
 
@@ -225,16 +232,13 @@ async function boot(): Promise<void> {
 
   els.draw.addEventListener('click', () => void draw())
   els.play.addEventListener('click', () => void play())
-  // Without a contact address the Report control cannot send anything, and
-  // `report()` would silently do nothing — a dead safety affordance is worse than a
-  // visibly absent one. Reports deliberately do NOT fall back to public GitHub issues:
-  // that would build a searchable public index of the worst content on the site.
-  if (REPORT_TO) {
-    els.report.addEventListener('click', report)
-  } else {
-    els.report.hidden = true
-    console.warn('VITE_REPORT_EMAIL is unset — the Report control is hidden.')
-  }
+  // The control always works: it hides the video locally and redraws. Only the mailto
+  // half depends on configuration, so the label and the banner say what actually
+  // happened rather than claiming a report was filed when none was sent.
+  // Reports deliberately do NOT fall back to public GitHub issues — that would build a
+  // searchable public index of the worst content the site can surface.
+  els.report.textContent = REPORT_TO ? 'Report this video' : 'Hide this video'
+  els.report.addEventListener('click', report)
   els.safe.addEventListener('change', () => {
     els.banner.hidden = els.safe.checked
     if (!els.safe.checked) {

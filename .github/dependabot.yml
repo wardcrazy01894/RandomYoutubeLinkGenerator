@@ -32,8 +32,10 @@ updates:
       # and build all passed on 7.0.2. Tracking:
       # https://github.com/typescript-eslint/typescript-eslint/issues/10940
       # Version-scoped, not type-scoped: `update-types: semver-major` also silenced
-      # TS 6, which typescript-eslint 8 supports today (peer: >=4.8.4 <6.1.0). Only 7+
-      # is actually blocked, and only until typescript-eslint catches up.
+      # TS 6, which typescript-eslint 8 supports today (peer: >=4.8.4 <6.1.0). The bound
+      # is >=7 rather than >=6.1 deliberately: 6.1+ merely falls outside that peer range,
+      # which npm reports as a warning and CI would catch, whereas 7 makes
+      # typescript-eslint hard-error on load and take `npm run lint` with it.
       - dependency-name: typescript
         versions: ['>=7']
 
