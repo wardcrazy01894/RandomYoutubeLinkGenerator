@@ -1,9 +1,13 @@
 name: harvest
 
-# Nightly sampling run. Pushes the grown pool to the unprotected `pool` branch, then
-# publishes. It does NOT open a pull request: a GITHUB_TOKEN-created PR does not fire
-# `pull_request` events, so the required checks on `main` would never report and every
-# nightly PR would be permanently unmergeable. See docs/DESIGN.md §4.3.
+# Nightly sampling run. Accumulates into the unprotected `pool` branch and stops there:
+# it does NOT deploy, because `main` is the source of truth and viewers must only ever be
+# served data that has been merged. Run promote-pool.yml to propose a branch -> main
+# promotion. See docs/DESIGN.md §4.3.
+#
+# It does not open the promotion PR itself either: a GITHUB_TOKEN-created PR fires no
+# `pull_request` event, so the required checks on `main` would never report and the PR
+# would be permanently unmergeable.
 #
 # The nightly push to `pool` also counts as repo activity, which keeps GitHub from
 # auto-disabling this schedule after 60 days.
@@ -23,15 +27,12 @@ on:
         required: false
         default: false
 
-# A called reusable workflow cannot request permissions the CALLER does not hold, and
-# GitHub rejects the whole workflow at startup if it tries. The `publish` job calls
-# deploy-pages.yml, which needs pages/id-token — so those must be granted here too,
-# even though no step in this workflow uses them directly.
+# No pages/id-token here any more: this workflow no longer calls deploy-pages.yml, so
+# granting them would hand the nightly run the ability to publish to the live site — the
+# exact thing making main the source of truth is meant to prevent.
 permissions:
   contents: write # push to the `pool` branch
   issues: write # raise the health alarm
-  pages: write # required by the reusable deploy-pages.yml
-  id-token: write # required by the reusable deploy-pages.yml
 
 # Never let a manual run collide with the cron and fight over the branch.
 concurrency:
@@ -78,6 +79,48 @@ jobs:
             # The extract above cannot fail loudly on its own, so assert the result.
             test -f public/data/pool/manifest.json \
               || { echo "Restore produced no manifest.json — refusing to continue"; exit 1; }
+            # If a promotion has landed, main already contains everything this branch had.
+            # Continuing on the stale branch would make the NEXT promotion copy a smaller
+            # pool over main — silent data loss. Start the delta again from main instead.
+            MAIN_TOTAL=$(git show HEAD:public/data/pool/manifest.json \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).total))')
+            POOL_TOTAL=$(node -e "console.log(require('./public/data/pool/manifest.json').total)")
+            if [ "$MAIN_TOTAL" -ge "$POOL_TOTAL" ]; then
+              echo "main ($MAIN_TOTAL) has caught up with pool ($POOL_TOTAL) — a promotion landed."
+              echo "Restarting the delta from main."
+              # rm the directory first: `git checkout HEAD --` restores main's tracked
+              # files but leaves behind any shard the BRANCH had and main does not, so a
+              # plain checkout produced a hybrid tree that check-pool.mjs then rejected —
+              # after the night's quota was already spent.
+              # Tombstones are the one thing the branch can hold that main does not:
+              # a sweep running AFTER a promotion writes them with no change to total,
+              # so this reset is reached with them still branch-only. Copying main over
+              # them dropped them silently, and the next promotion put those deleted
+              # videos back in front of viewers. Carry them across.
+              cp public/data/pool/tombstones.json /tmp/branch-tombstones.json
+              # Same for state.json, for a different reason: it is the HARVESTER'S
+              # progress (Feistel counter, re-harvest and sweep cursors), and the branch
+              # is where that progress is made. main's copy is a published snapshot that
+              # can only be older. Restoring it re-sampled prefixes already drawn and
+              # re-swept windows already checked. Note this means manual intervention on
+              # the counter belongs on the `pool` branch, which is the only copy the
+              # harvester ever reads.
+              cp public/data/pool/state.json /tmp/branch-state.json
+              rm -rf public/data/pool
+              git checkout HEAD -- public/data/pool
+              mv /tmp/branch-state.json public/data/pool/state.json
+              node scripts/merge-tombstones.mjs \
+                --base public/data/pool/tombstones.json \
+                --add /tmp/branch-tombstones.json \
+                --out public/data/pool/tombstones.json
+              # NOTE: .pool-branch is deliberately NOT deleted. Removing it sent Publish
+              # down its `git init` path, which builds an orphan history unrelated to
+              # origin/pool, and the push (correctly, deliberately not --force) was then
+              # rejected as a non-fast-forward — every night, forever. Publish already
+              # replaces the working files while keeping .git, so resetting the DATA here
+              # is all that is wanted; the branch simply gains a commit that returns it to
+              # main's state.
+            fi
             echo "Restored $(ls public/data/pool | wc -l) files from the pool branch"
           elif [ "$rc" -eq 2 ]; then
             echo "No pool branch yet — it will be created from the seed in main."
@@ -261,7 +304,6 @@ jobs:
               })
             }
 
-  publish:
-    needs: harvest
-    if: success()
-    uses: ./.github/workflows/deploy-pages.yml
+  # Deliberately no publish job. `main` is the source of truth: deploy-pages builds from
+  # main's committed pool, so a harvest changes nothing a viewer sees until it has been
+  # promoted (see promote-pool.yml) and merged. The branch is a staging area.

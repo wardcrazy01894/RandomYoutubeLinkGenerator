@@ -12,21 +12,81 @@ Everything here exists to make that loud.
 | On push to `main`      | Build + deploy the site                      | `.github/workflows/deploy.yml`  |
 | Nightly (with harvest) | Re-validation sweep                          | `harvest.yml` step              |
 
+## Promoting the pool into `main`
+
+`main` is the source of truth — the deploy builds from its committed `public/data/pool`,
+so a night's harvest is invisible to viewers until it is promoted. To publish accumulated
+data:
+
+```bash
+gh workflow run promote-pool.yml --repo wardcrazy01894/RandomYoutubeLinkGenerator
+```
+
+It pushes a `promote/pool` branch and stops there. **You open the PR** — the run summary
+prints a one-click compare link, or:
+
+```bash
+gh pr create --repo wardcrazy01894/RandomYoutubeLinkGenerator \
+  --head promote/pool --base main --title "Promote pool" --fill
+```
+
+The workflow cannot open it for you: a PR created with `GITHUB_TOKEN` fires no
+`pull_request` event, so the required checks never report and it could never be merged.
+That rule keys on the token, so dispatching the workflow by hand does not help.
+
+The run summary carries the numbers that matter (videos before/after, how many added, how
+many tombstoned) — read those rather than the shard diff, which is machine-generated.
+`pool integrity` gates the structural invariants, and the workflow additionally refuses to
+promote a pool that has _shrunk_, since the pool is append-only. `blocklist.json` is taken
+from `main`, never the branch, so a promotion cannot resurrect an id removed here.
+
+Re-dispatching force-pushes `promote/pool`, which updates an already-open PR rather than
+leaving a second one behind. The flip side: anything committed to that branch by hand
+(say a fix to one bad record while the PR is in review) is discarded by the next
+dispatch. Make such fixes on `main` after the promotion merges, not on the branch.
+
+Merging it triggers `deploy.yml`, and the site serves the new pool.
+
+Afterwards the branch resets its DATA: the next harvest notices main has caught up
+(`main total >= pool total`) and restarts the delta from main, committing that reset onto
+the same branch. So `pool` only ever holds what has accumulated since the last promotion.
+Its git history is never discarded — the push is always a fast-forward.
+
 ## Branches
 
 - **`main`** — protected. All changes via PR, required checks, no force-push.
-- **`pool`** — deliberately unprotected. The harvester commits on top of it each
+- **`pool`** — deliberately unprotected **staging**, not what the site serves. The
+  harvester commits on top of it each
   night and fast-forwards; it is not force-pushed, so every run is a reviewable
   commit you can diff or revert.
 
-The `pool` branch keeps a real commit per harvest (`harvest: pool at N videos`), so you
-can diff any two nights and `git revert` a bad run. To roll the served pool back, reset
-the branch to a known-good commit — the next deploy picks it up:
+### Rolling back what viewers see
+
+**Resetting the `pool` branch does not roll back the live site.** It used to, when the
+deploy overlaid the branch at build time. It no longer does: the site is built from the
+pool committed on `main`, so a force-push to `pool` changes nothing a viewer sees, and the
+deploy will appear to succeed while serving exactly what it served before. During an
+incident that is the worst possible failure — it looks like it worked.
+
+To pull something from the live site, change `main`:
+
+```bash
+# Fastest for one bad video — the client filters blocklisted ids on load.
+gh pr create ...   # add the id to public/data/pool/blocklist.json on main
+```
+
+To roll back a whole promotion, revert its merge commit on `main` via a PR. Merging
+either one triggers `deploy.yml`, and that is what actually changes the site.
+
+Resetting `pool` is still the right move for a bad _harvest_ — it stops the bad data ever
+reaching a promotion. It just is not a rollback of anything already merged:
 
 ```bash
 git push --force origin <good-sha>:pool
-gh workflow run deploy.yml --repo wardcrazy01894/RandomYoutubeLinkGenerator
 ```
+
+The branch keeps a real commit per harvest (`harvest: pool at N videos`), so you can diff
+any two nights and `git revert` a bad run.
 
 `pool` exists because a `GITHUB_TOKEN`-created pull request does **not** fire
 `pull_request` events. A nightly PR would therefore never get its required checks
@@ -166,10 +226,20 @@ The site filters blocklisted IDs at draw time.
 
 ## Running the re-validation sweep (read this first)
 
-`npm run revalidate` writes `tombstones.json`, and unlike `blocklist.json` that file is
-**not** restored from `main`. Both workflows `rm -rf public/data/pool` and repopulate from
-the `pool` branch, so a sweep run against a plain checkout of `main` writes tombstones
-that are silently discarded on the next harvest or deploy.
+The sweep runs nightly inside the harvest job, so you rarely need to run it by hand.
+
+If you do: `npm run revalidate` writes `tombstones.json`. Run it against a checkout of the
+`pool` branch, not a plain checkout of `main` — the harvest repopulates `public/data/pool`
+from the branch each night, so tombstones written anywhere else are not where the
+harvester will look. They are no longer _lost_ if you get this wrong: the harvest's reset
+path merges tombstones in both directions. But the harvester will not see them until they
+reach the branch.
+
+(Committing them straight to `main` instead is a different thing, not a broken version of
+this one: `main` is what the site is built from, so those tombstones take effect on the
+live site at the next deploy without ever touching the branch. That is a legitimate way to
+pull a dead video, and the next promotion merges rather than overwrites, so the branch
+catches up on its own.)
 
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
 copied back and forth:
