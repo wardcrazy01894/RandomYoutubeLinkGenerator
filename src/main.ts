@@ -61,9 +61,17 @@ function readDead(): string[] {
   }
 }
 function markDead(id: string): void {
-  const list = readDead().filter((x) => x !== id)
-  list.push(id)
-  localStorage.setItem(DEAD_KEY, JSON.stringify(list.slice(-DEAD_LIST_CAP)))
+  // Storage can be unavailable (private browsing, partitioned or disabled storage). The
+  // read side already tolerated that; without the same guard here the click threw before
+  // the banner and before the redraw, so the control appeared to do nothing at all.
+  // Hiding is best-effort and capped, so it is not permanent — the docs say so.
+  try {
+    const list = readDead().filter((x) => x !== id)
+    list.push(id)
+    localStorage.setItem(DEAD_KEY, JSON.stringify(list.slice(-DEAD_LIST_CAP)))
+  } catch {
+    /* not persisted — the draw still advances */
+  }
 }
 const excluded = (): Set<string> => new Set([...blocked, ...readDead()])
 
