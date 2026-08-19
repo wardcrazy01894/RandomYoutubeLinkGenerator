@@ -53,17 +53,44 @@ jobs:
       # commit deep: no diffs between runs and no way to roll back a bad harvest.
       - name: Restore the live pool from the `pool` branch
         run: |
-          if git ls-remote --exit-code --heads origin pool >/dev/null 2>&1; then
+          set -euo pipefail
+          # Distinguish "branch does not exist" (exit 2) from a transport/auth failure
+          # (exit 128). Swallowing both meant a transient error silently took the
+          # create-the-branch path and burned the night's quota on a rejected push.
+          set +e
+          git ls-remote --exit-code --heads origin pool >/dev/null 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
             git clone --quiet --branch pool --single-branch --depth=1 \
-              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+              "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" \
               .pool-branch
             rm -rf public/data/pool && mkdir -p public/data/pool
-            find .pool-branch -mindepth 1 -maxdepth 1 ! -name .git \
-              -exec cp -R {} public/data/pool/ \;
+            # archive rather than `cp -R .pool-branch/.`: that would copy .git/config,
+            # which holds the token in cleartext, into public/ — the directory Vite
+            # copies verbatim into dist/. Even briefly, that window is not worth having.
+            git -C .pool-branch archive HEAD | tar -x -C public/data/pool
+            # The extract above cannot fail loudly on its own, so assert the result.
+            test -f public/data/pool/manifest.json \
+              || { echo "Restore produced no manifest.json — refusing to continue"; exit 1; }
             echo "Restored $(ls public/data/pool | wc -l) files from the pool branch"
-          else
+          elif [ "$rc" -eq 2 ]; then
             echo "No pool branch yet — it will be created from the seed in main."
+          else
+            echo "git ls-remote failed (exit $rc) — aborting rather than guessing"
+            exit 1
           fi
+          # blocklist.json is a human-curated SAFETY file and main is authoritative for
+          # it. Without this, an ID added on main never reaches the site: the pool branch
+          # would round-trip its own frozen copy forever.
+          # Not an AND-list: set -e is exempt inside one, so this is safe today only
+          # because it is the step's last line. Any line added below would silently
+          # reintroduce the failure. Same form as deploy-pages.yml.
+          git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
+            || { echo "Could not read blocklist.json from main — refusing to continue"; exit 1; }
+          mv /tmp/blocklist.json public/data/pool/blocklist.json
+        env:
+          GH_PAT: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Harvest
         id: run
@@ -77,16 +104,16 @@ jobs:
 
       - name: Publish the pool
         run: |
+          set -euo pipefail
           if [ -d .pool-branch/.git ]; then
             # Swap in this run's output but KEEP .git, so the commit extends the
             # existing history and the push is a plain fast-forward.
             find .pool-branch -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           else
-            # First ever run: start the branch from scratch.
             rm -rf .pool-branch && mkdir -p .pool-branch
             git -C .pool-branch init -q -b pool
             git -C .pool-branch remote add origin \
-              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+              "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git"
           fi
           cp -R public/data/pool/. .pool-branch/
           cd .pool-branch
@@ -100,9 +127,26 @@ jobs:
             echo "No pool changes to publish."
             exit 0
           fi
-          git commit -q -m "harvest: pool at $(node -e "console.log(require('./manifest.json').total)") videos"
+          NEW=$(node -e "console.log(require('./manifest.json').total)")
+          # Append-only means two exact invariants: the total never decreases and no
+          # shard is ever deleted. Both are cheap, and together they make it impossible
+          # to fast-forward an empty or shrunken pool over a good one.
+          if git rev-parse --verify -q HEAD >/dev/null; then
+            PREV=$(git show HEAD:manifest.json \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).total))')
+            [ "$NEW" -ge "$PREV" ] \
+              || { echo "REFUSING TO PUBLISH: pool shrank $PREV -> $NEW"; exit 1; }
+            DELETED=$(git diff --cached --diff-filter=D --name-only)
+            if grep -q '^shard-' <<<"$DELETED"; then
+              echo "REFUSING TO PUBLISH: a shard was deleted; shards are immutable"
+              exit 1
+            fi
+          fi
+          git commit -q -m "harvest: pool at ${NEW} videos"
           # No --force: this is a fast-forward onto the branch we just cloned.
           git push -q origin HEAD:pool
+        env:
+          GH_PAT: ${{ secrets.GITHUB_TOKEN }}
 
       # A red Actions run on an unwatched repo is invisible. An issue sends email.
       - name: Raise the alarm

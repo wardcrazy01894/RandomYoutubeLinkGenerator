@@ -115,17 +115,44 @@ console.log(
 
 // --- harvest ----------------------------------------------------------------
 const found = new Map()
+const priorCounter = state.counter
+let freshAttempted = 0
+let reharvestAttempted = 0
+// The fresh counter may only advance over a CONTIGUOUS run of queried prefixes, because
+// state.counter is a single integer resume point. Once one fresh bucket fails, every
+// later success in this run must not be counted, or the failed prefix is skipped for
+// good while a later one gets queried twice.
+let freshHole = false
 let bucketsDone = 0
 let unexhausted = 0
 let quotaHit = false
 
-for (const { n } of plan) {
+for (const { n, fresh } of plan) {
   if (remaining() < COST.search * (MAX_PAGES + 1)) break
+  // Once a fresh bucket has failed, the counter is frozen for this run, so any further
+  // fresh query would be re-harvested tomorrow anyway — and worse, committing its records
+  // while the counter stays put collapses tomorrow's yield, trips the yield gate, and the
+  // gate exits BEFORE writeState. That loops: same frozen counter, same collapse, night
+  // after night. Skipping the rest of the fresh plan keeps the damage to a single run and
+  // lets the remaining budget fall through to the re-harvest entries.
+  if (fresh && freshHole) continue
   await sleep(PACING_MS)
   const q = prefixAt(FEISTEL_KEY, n)
   try {
     const { ids, exhausted } = await harvestBucket(q)
     bucketsDone++
+    // Count the prefix consumed only once the query actually came back. Counting
+    // before the try burned prefixes on every throw — and because HARVEST_UNITS sits
+    // just under the daily quota, a QuotaExceeded throw is the NORMAL way a run ends.
+    // An unexhausted bucket still counts: it was queried and deliberately rejected,
+    // so retrying it forever would stall the counter behind one bad prefix.
+    if (fresh) {
+      if (!freshHole) freshAttempted++
+    } else {
+      // The re-harvest cursor tolerates holes: a skipped bucket simply comes back one
+      // rotation later, so it needs no contiguity rule.
+      reharvestAttempted++
+    }
     if (!exhausted) {
       unexhausted++
       continue
@@ -140,6 +167,10 @@ for (const { n } of plan) {
       console.error(`FATAL: ${err.message}`)
       process.exit(1)
     }
+    // A generic failure (persistent 5xx, network) does not stop the run, but it does
+    // punch a hole in the fresh sequence — so freeze the fresh counter here. The cost is
+    // re-querying a few prefixes next run; the alternative is losing one permanently.
+    if (fresh) freshHole = true
     console.warn(`bucket ${q} failed: ${err.message}`)
   }
 }
@@ -211,10 +242,21 @@ const total = appendRecords(records, manifest.total)
 // so the whole pool is servable; the client still filters safety flags and tombstones.
 const servable = total
 
-state.counter = Math.min(state.counter + freshCount, PREFIX_SPACE)
+// Advance by prefixes we actually QUERIED, not by the number planned. The loop exits
+// early on budget exhaustion or quotaExceeded, and `affordable` assumes one page per
+// bucket while a bucket may cost up to MAX_PAGES. Advancing by the plan permanently
+// burned prefixes that were never sampled, silently shrinking the frame (P0 per
+// CLAUDE.md). Only a contiguous run of successfully queried fresh buckets counts; see
+// freshHole above.
+state.counter = Math.min(state.counter + freshAttempted, PREFIX_SPACE)
+// Same correction for the re-harvest cursor. The plan's fresh entries all precede the
+// re-harvest ones, so a break during the fresh section runs ZERO re-harvest buckets while
+// the cursor would still jump by the planned count, skipping those old buckets for a full
+// rotation. Reduce modulo the PRIOR counter, since the plan indices were built against it
+// and state.counter has already advanced on the line above.
 state.reharvestCursor =
-  state.counter > 0
-    ? (state.reharvestCursor + reharvestCount) % state.counter
+  priorCounter > 0
+    ? (state.reharvestCursor + reharvestAttempted) % priorCounter
     : 0
 state.totalBuckets += bucketsDone
 writeState(state)

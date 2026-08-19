@@ -15,7 +15,9 @@ Everything here exists to make that loud.
 ## Branches
 
 - **`main`** — protected. All changes via PR, required checks, no force-push.
-- **`pool`** — deliberately unprotected, force-pushed nightly by the harvester.
+- **`pool`** — deliberately unprotected. The harvester commits on top of it each
+  night and fast-forwards; it is not force-pushed, so every run is a reviewable
+  commit you can diff or revert.
 
 The `pool` branch keeps a real commit per harvest (`harvest: pool at N videos`), so you
 can diff any two nights and `git revert` a bad run. To roll the served pool back, reset
@@ -93,8 +95,36 @@ gh api -X POST repos/wardcrazy01894/RandomYoutubeLinkGenerator/pages/builds  # o
 gh api -X DELETE repos/wardcrazy01894/RandomYoutubeLinkGenerator/pages       # disables Pages entirely
 ```
 
-Disabling Pages takes effect in under a minute. To remove a single video instead, add its
-ID to `public/data/pool/blocklist.json` and merge — it is filtered at draw time.
+Disabling Pages takes effect in under a minute.
+
+To remove a single video instead, add its ID to `public/data/pool/blocklist.json` on
+**`main`** and merge. `main` is authoritative for the blocklist: both the deploy and the
+harvest workflows overwrite the branch's copy with main's after restoring the pool, so an
+entry added here propagates on the next deploy and is then carried onto the `pool` branch.
+The site filters blocklisted IDs at draw time.
+
+## Running the re-validation sweep (read this first)
+
+`npm run revalidate` writes `tombstones.json`, and unlike `blocklist.json` that file is
+**not** restored from `main`. Both workflows `rm -rf public/data/pool` and repopulate from
+the `pool` branch, so a sweep run against a plain checkout of `main` writes tombstones
+that are silently discarded on the next harvest or deploy.
+
+Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
+copied back and forth:
+
+```bash
+git clone --branch pool --single-branch \
+  git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git pool-data
+POOL_DIR=pool-data npm run revalidate
+cd pool-data && git add -A \
+  && git commit -m "revalidate: prune dead videos" && git push
+```
+
+The split is deliberate: `blocklist.json` is human-curated and lives on `main` so removals
+go through review, while `tombstones.json` is machine-generated sweep output and belongs
+with the pool data. Automating the sweep as a workflow would remove this footgun and is
+the right follow-up.
 
 ## Manual operations
 
