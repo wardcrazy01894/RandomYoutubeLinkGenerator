@@ -115,7 +115,9 @@ console.log(
 
 // --- harvest ----------------------------------------------------------------
 const found = new Map()
+const priorCounter = state.counter
 let freshAttempted = 0
+let reharvestAttempted = 0
 let bucketsDone = 0
 let unexhausted = 0
 let quotaHit = false
@@ -123,11 +125,17 @@ let quotaHit = false
 for (const { n, fresh } of plan) {
   if (remaining() < COST.search * (MAX_PAGES + 1)) break
   await sleep(PACING_MS)
-  if (fresh) freshAttempted++
   const q = prefixAt(FEISTEL_KEY, n)
   try {
     const { ids, exhausted } = await harvestBucket(q)
     bucketsDone++
+    // Count the prefix consumed only once the query actually came back. Counting
+    // before the try burned prefixes on every throw — and because HARVEST_UNITS sits
+    // just under the daily quota, a QuotaExceeded throw is the NORMAL way a run ends.
+    // An unexhausted bucket still counts: it was queried and deliberately rejected,
+    // so retrying it forever would stall the counter behind one bad prefix.
+    if (fresh) freshAttempted++
+    else reharvestAttempted++
     if (!exhausted) {
       unexhausted++
       continue
@@ -219,9 +227,14 @@ const servable = total
 // burned prefixes that were never sampled, silently shrinking the frame (P0 per
 // CLAUDE.md) — 15 of the first 38 were lost this way.
 state.counter = Math.min(state.counter + freshAttempted, PREFIX_SPACE)
+// Same correction for the re-harvest cursor. The plan's fresh entries all precede the
+// re-harvest ones, so a break during the fresh section runs ZERO re-harvest buckets while
+// the cursor would still jump by the planned count, skipping those old buckets for a full
+// rotation. Reduce modulo the PRIOR counter, since the plan indices were built against it
+// and state.counter has already advanced on the line above.
 state.reharvestCursor =
-  state.counter > 0
-    ? (state.reharvestCursor + reharvestCount) % state.counter
+  priorCounter > 0
+    ? (state.reharvestCursor + reharvestAttempted) % priorCounter
     : 0
 state.totalBuckets += bucketsDone
 writeState(state)

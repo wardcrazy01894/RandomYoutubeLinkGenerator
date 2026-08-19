@@ -30,9 +30,20 @@ if (!existsSync(join(POOL_DIR, 'manifest.json'))) {
 
 const manifest = readManifest()
 
-if (!(manifest.total > 0)) {
+if (!Number.isInteger(manifest.total) || manifest.total <= 0) {
   console.error(
     `manifest.total is ${manifest.total} — an empty pool is never a valid publish`,
+  )
+  process.exit(1)
+}
+
+// servable is what the client actually draws from: src/pool.ts throws EmptyPoolError at
+// servable <= 0, so a pool with records but servable 0 is a dead site that the total
+// check alone waves through. Integrality matters too — a fractional value reaches
+// randomBelow(), which requires an integer.
+if (!Number.isInteger(manifest.servable) || manifest.servable <= 0) {
+  console.error(
+    `manifest.servable is ${manifest.servable} — nothing would be drawable`,
   )
   process.exit(1)
 }
@@ -57,6 +68,12 @@ let counted = 0
 const ids = new Set()
 for (let i = 0; i < shardFiles.length; i++) {
   const records = readShard(i)
+  // A shard that parses but is not an array would throw an uncaught TypeError below:
+  // non-zero exit, but a stack trace instead of a diagnosis.
+  if (!Array.isArray(records)) {
+    fail(`shard ${i} is not a JSON array`)
+    continue
+  }
   const isLast = i === shardFiles.length - 1
   // Every shard but the last must be exactly full, or index arithmetic
   // (shard = floor(i/K), idx = i%K) silently addresses the wrong record.

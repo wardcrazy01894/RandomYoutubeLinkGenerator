@@ -66,9 +66,11 @@ jobs:
               "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" \
               .pool-branch
             rm -rf public/data/pool && mkdir -p public/data/pool
-            cp -R .pool-branch/. public/data/pool/
-            rm -rf public/data/pool/.git
-            # The copy above cannot fail loudly on its own, so assert the result.
+            # archive rather than `cp -R .pool-branch/.`: that would copy .git/config,
+            # which holds the token in cleartext, into public/ — the directory Vite
+            # copies verbatim into dist/. Even briefly, that window is not worth having.
+            git -C .pool-branch archive HEAD | tar -x -C public/data/pool
+            # The extract above cannot fail loudly on its own, so assert the result.
             test -f public/data/pool/manifest.json \
               || { echo "Restore produced no manifest.json — refusing to continue"; exit 1; }
             echo "Restored $(ls public/data/pool | wc -l) files from the pool branch"
@@ -81,7 +83,8 @@ jobs:
           # blocklist.json is a human-curated SAFETY file and main is authoritative for
           # it. Without this, an ID added on main never reaches the site: the pool branch
           # would round-trip its own frozen copy forever.
-          git show HEAD:public/data/pool/blocklist.json > public/data/pool/blocklist.json
+          git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
+            && mv /tmp/blocklist.json public/data/pool/blocklist.json
         env:
           GH_PAT: ${{ secrets.GITHUB_TOKEN }}
 
@@ -129,7 +132,8 @@ jobs:
               | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).total))')
             [ "$NEW" -ge "$PREV" ] \
               || { echo "REFUSING TO PUBLISH: pool shrank $PREV -> $NEW"; exit 1; }
-            if git diff --cached --diff-filter=D --name-only | grep -q '^shard-'; then
+            DELETED=$(git diff --cached --diff-filter=D --name-only)
+            if grep -q '^shard-' <<<"$DELETED"; then
               echo "REFUSING TO PUBLISH: a shard was deleted; shards are immutable"
               exit 1
             fi
