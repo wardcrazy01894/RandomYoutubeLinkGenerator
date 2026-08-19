@@ -367,7 +367,9 @@ identifies "home video of somebody's kids", and we do not pretend otherwise.
 
 Harvest, hold 7 days, re-validate, then serve. Videos YouTube removes in that window never
 reach a viewer. Revision 1 framed this sweep as staleness hygiene; it is actually the
-primary safety mechanism, and it runs weekly.
+primary safety mechanism. NOTE: nothing currently schedules it — it is a manual
+`npm run revalidate` (see docs/OPERATIONS.md). Automating it is the outstanding
+follow-up, and until then the cadence is whatever an operator actually does.
 
 ### 5.4 Report path, blocklist, kill switch
 
@@ -414,7 +416,8 @@ Matching the house conventions, plus what review found missing:
 ## 8. What the site actually claims
 
 "Truly random" is not defensible and is retired. The real frame is: _public videos that are
-in the search index, have a dash at position 5, are embeddable, survived re-validation, and
+in the search index, have a dash at position 5, are embeddable in the default view,
+survived re-validation, and
 are not blocklisted._
 
 Uniform-over-a-stated-frame is a **stronger** claim than "truly random", because it is

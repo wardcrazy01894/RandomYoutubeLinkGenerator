@@ -28,29 +28,22 @@ const manifest = readManifest()
 const tombstones = readTombstones()
 const known = new Set(tombstones.ids)
 
-// Blocklisted videos are filtered client-side at draw time, but the sweep never knew
-// about them — so pool statistics counted removed videos as live, and the docs claiming
-// the blocklist was "honoured by the sweep" were unbacked. Fold them into tombstones,
-// which is effectively what they are, and skip spending quota re-checking them.
-const blocklisted = readBlocklist().ids ?? []
-let newlyBlocked = 0
-for (const id of blocklisted) {
-  if (!known.has(id)) {
-    known.add(id)
-    newlyBlocked++
-  }
-}
-if (newlyBlocked > 0) {
-  console.log(`folded ${newlyBlocked} blocklisted ids into tombstones`)
-}
+// Blocklisted ids are SKIPPED to save quota but deliberately NOT written into
+// tombstones. Folding them in made blocklist removal irreversible: `main` restores
+// blocklist.json on every deploy, but nothing restores tombstones.json — so deleting an
+// id from the blocklist left the video excluded forever via a file no one edits back. It
+// also made every description of tombstones.json ("only permanent states") untrue.
+const blocklisted = new Set(readBlocklist().ids ?? [])
+const skip = new Set([...known, ...blocklisted])
 
 const shards = Math.ceil(manifest.total / SHARD_SIZE)
 const all = []
 for (let i = 0; i < shards; i++) {
-  for (const r of readShard(i)) if (!known.has(r.id)) all.push(r)
+  for (const r of readShard(i)) if (!skip.has(r.id)) all.push(r)
 }
 console.log(
-  `revalidating ${all.length} live records (${known.size} already tombstoned)`,
+  `revalidating ${all.length} live records (${known.size} tombstoned, ` +
+    `${blocklisted.size} blocklisted)`,
 )
 
 const dead = []
@@ -98,9 +91,11 @@ const MAX_REMOVAL_RATIO = 0.2
 // Deliberate override for a genuinely large cleanup, so a >20% removal cannot wedge the
 // sweep forever (every later run would re-check the same records and refuse again).
 const ALLOW_MASS_REMOVAL = process.env.ALLOW_MASS_REMOVAL === '1'
-// A minimum sample before the ratio means anything: on an early pool of a dozen records,
-// two genuine deletions are 17% and would trip a percentage guard for no reason.
-const MIN_SAMPLE_FOR_RATIO = 50
+// An absolute floor alongside the ratio, replacing an earlier sample-size floor that let
+// 48 dead out of 49 checked (98%) slip past: a small pool is exactly where a bad response
+// wipes everything. Two genuine deletions on an early pool stay under this and do not
+// trip the guard.
+const MIN_ABSOLUTE_REMOVALS = 10
 // `dead === checked` is refused unconditionally, floor or no floor: a sweep in which
 // NOTHING survived is a bad response, not a pool that vanished. The ratio floor alone
 // left a 49-record pool wipeable in a single run.
@@ -108,7 +103,7 @@ const wipedEverything = checked > 0 && dead.length === checked
 if (
   !ALLOW_MASS_REMOVAL &&
   (wipedEverything ||
-    (checked >= MIN_SAMPLE_FOR_RATIO &&
+    (dead.length >= MIN_ABSOLUTE_REMOVALS &&
       dead.length / checked > MAX_REMOVAL_RATIO))
 ) {
   console.error(
