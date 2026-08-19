@@ -156,9 +156,22 @@ describe('incremental cursor', () => {
   it('advances only past records it actually checked when quota runs out', () => {
     seed(250)
     run({ REVALIDATE_UNITS: '5', STUB_QUOTA_AFTER: '100' })
-    const c = state().sweepCursor
-    expect(c, 'cursor must not jump past unchecked records').toBeGreaterThan(0)
-    expect(c).toBeLessThanOrEqual(150)
+    // EXACT, not a range: a loose bound let an off-by-one survive that skipped one
+    // record on every truncated run — a permanent coverage hole.
+    expect(
+      state().sweepCursor,
+      'must resume exactly after the last checked record',
+    ).toBe(100)
+  })
+
+  // Truncation AND interleaved skips together: the arithmetic has to count positions,
+  // not checked records, or the resume point drifts.
+  it('resumes exactly after the last checked record when skips are interleaved', () => {
+    seed(400, { tombstones: [id(0), id(1), id(2), id(50), id(51)] })
+    run({ REVALIDATE_UNITS: '5', STUB_QUOTA_AFTER: '60' })
+    // Quota is spent per 50-id batch, so two batches complete: 100 records checked,
+    // plus the 5 skipped positions among them = position 105.
+    expect(state().sweepCursor).toBe(105)
   })
 
   it('steps over already-excluded records rather than stalling on them', () => {
@@ -175,7 +188,6 @@ describe('mass-removal guard', () => {
     const r = run({
       STUB_DEAD: Array.from({ length: 80 }, (_, i) => id(i)).join(','),
     })
-    expect(r.code).toBe(1)
     expect(r.out).toMatch(/REFUSING/)
     expect(tombs(), 'nothing may be written when the guard fires').toEqual([])
   })
@@ -185,8 +197,38 @@ describe('mass-removal guard', () => {
     const r = run({
       STUB_DEAD: Array.from({ length: 5 }, (_, i) => id(i)).join(','),
     })
-    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/REFUSING/)
     expect(tombs()).toEqual([])
+  })
+
+  // The guard used to exit(1) BEFORE advancing the cursor, so the identical window was
+  // retried every night forever — budget burned, nothing else re-validated, and under
+  // continue-on-error the job reported success while doing it.
+  it('keeps sweeping after a refusal instead of retrying the same window forever', () => {
+    seed(200)
+    const r = run({
+      STUB_DEAD: Array.from({ length: 80 }, (_, i) => id(i)).join(','),
+      REVALIDATE_UNITS: '1',
+    })
+    expect(r.code, 'a refusal must not fail the run that contains it').toBe(0)
+    expect(
+      state().sweepCursor,
+      'the cursor must advance past a refused window',
+    ).toBe(50)
+  })
+
+  it('flags a refusal in the manifest so CI can alarm on it', () => {
+    seed(200)
+    run({ STUB_DEAD: Array.from({ length: 80 }, (_, i) => id(i)).join(',') })
+    const m = JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+    expect(m.stats.lastSweep.refused, 'a refusal must not be silent').toBe(true)
+  })
+
+  it('does not flag a healthy sweep as refused', () => {
+    seed(200)
+    run({ STUB_DEAD: id(0) })
+    const m = JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+    expect(m.stats.lastSweep.refused).toBe(false)
   })
 
   it('allows a small genuine cleanup', () => {

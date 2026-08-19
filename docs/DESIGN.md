@@ -219,7 +219,7 @@ Daily budget against 10,000 units, at the measured k=5 rate of ~5 videos/bucket:
 | `videos.list` enrichment           | 1 / 50 IDs | ~10 calls | 10    |
 | Reserve                            |            |           | ~590  |
 
-≈ 94 buckets/night, of which ~83% exhaust, x ~5 members = **~390 new videos/night**, each
+≈ 89 buckets/night, of which ~83% exhaust, x ~5 members = **~370 new videos/night**, each
 fully enriched. That is ~140k/year, against a prefix space that takes over a millennium to
 exhaust.
 

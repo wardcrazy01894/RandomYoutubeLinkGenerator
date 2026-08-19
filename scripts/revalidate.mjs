@@ -5,8 +5,12 @@
 // YouTube has removed or made private since we harvested them stop being served.
 // Age-restriction and embeddability are deliberately NOT swept — they are governed by the
 // safe-mode toggle, and tombstoning them would convert a filter the viewer can lift into
-// a removal they cannot. See the dead-detection block below. `videos.list` costs 1 unit per 50 IDs, so sweeping the whole pool is
-// nearly free — a 100k pool costs 2,000 of 10,000 daily units.
+// a removal they cannot. See the dead-detection block below.
+//
+// The sweep is INCREMENTAL: each run re-checks a window starting at the persisted
+// `sweepCursor` and stops when REVALIDATE_UNITS is spent, so its cost is fixed no matter
+// how large the pool grows. `videos.list` costs 1 unit per 50 IDs, so the default 500
+// units covers 25,000 records per night — a 100k pool comes fully round every ~4 nights.
 //
 // Shards are immutable, so removals are recorded in tombstones.json rather than edited
 // out of the shards.
@@ -72,8 +76,8 @@ const skip = new Set([...known, ...blocklisted])
  */
 function* poolSlice(total, start, count) {
   if (total <= 0) return
-  let idx = start % total
-  let shardIndex = -1
+  let idx = ((start % total) + total) % total // tolerate a negative stored cursor
+  let shardIndex = null
   let shard = null
   for (let scanned = 0; scanned < count && scanned < total; scanned++) {
     const si = Math.floor(idx / SHARD_SIZE)
@@ -82,7 +86,8 @@ function* poolSlice(total, start, count) {
       shard = readShard(si)
     }
     const rec = shard[idx % SHARD_SIZE]
-    if (rec) yield rec
+    // `offset` is the position count, which advances even where a record is missing.
+    if (rec) yield { rec, offset: scanned }
     idx = (idx + 1) % total
   }
 }
@@ -90,7 +95,8 @@ function* poolSlice(total, start, count) {
 const start = Number.isInteger(state.sweepCursor) ? state.sweepCursor : 0
 const maxRecords = REVALIDATE_UNITS * BATCH
 const window = [...poolSlice(manifest.total, start, maxRecords)]
-const all = window.filter((r) => !skip.has(r.id))
+const positionsScanned = Math.min(maxRecords, manifest.total)
+const all = window.filter(({ rec }) => !skip.has(rec.id)).map(({ rec }) => rec)
 const wrapped = start + window.length >= manifest.total
 
 console.log(
@@ -155,47 +161,61 @@ const ALLOW_MASS_REMOVAL = process.env.ALLOW_MASS_REMOVAL === '1'
 // percentage of checked, so the ratio always decides. A constant says what it does.
 const MIN_ABSOLUTE_REMOVALS = 3
 const wipedEverything = checked > 0 && dead.length === checked
-if (
+const refused =
   !ALLOW_MASS_REMOVAL &&
   (wipedEverything ||
     (dead.length >= MIN_ABSOLUTE_REMOVALS &&
       dead.length / checked > MAX_REMOVAL_RATIO))
-) {
+
+if (refused) {
+  // Discard this window's findings but KEEP MOVING. Exiting here left the cursor
+  // unadvanced, so the identical window was retried every night forever — burning the
+  // budget, never re-validating anything else, and (under continue-on-error in CI)
+  // reporting success while doing so. The suspicious window is simply re-examined on the
+  // next full pass; meanwhile the client's onError still hides any dead video it serves.
   console.error(
-    `REFUSING: this sweep would tombstone ${dead.length} of ${checked} checked videos ` +
+    `REFUSING to tombstone ${dead.length} of ${checked} checked videos ` +
       `(>${MAX_REMOVAL_RATIO * 100}%). That is far more likely to be a bad API response ` +
-      `than reality, and tombstones are never re-checked. Nothing was written. ` +
+      `than reality, and tombstones are never re-checked, so nothing was written for this ` +
+      `window. The cursor still advances, so the rest of the pool keeps being swept. ` +
       `If this really is a legitimate cleanup, re-run with ALLOW_MASS_REMOVAL=1.`,
   )
-  process.exit(1)
+  dead.length = 0
 }
 
-// Advance only past what was actually CHECKED. A run cut short by quota must not skip
-// the records it never reached — that would leave permanent holes in coverage, which is
-// the failure the cursor exists to avoid.
-let consumed = 0
-if (checked >= all.length) {
-  consumed = window.length
-} else {
+// Advance only past what was actually CHECKED. A run cut short by quota must not skip the
+// records it never reached — that would leave permanent holes in coverage, which is the
+// failure the cursor exists to avoid. Counted in POSITIONS, so a missing record cannot
+// desync the cursor from the walk.
+let consumed = positionsScanned
+if (checked < all.length) {
   let seen = 0
-  for (const r of window) {
-    consumed++
-    if (!skip.has(r.id)) {
-      seen++
-      if (seen >= checked) break
+  for (const { rec, offset } of window) {
+    if (skip.has(rec.id)) continue
+    seen++
+    if (seen >= checked) {
+      consumed = offset + 1
+      break
     }
   }
+  if (checked === 0) consumed = 0
 }
-state.sweepCursor = manifest.total > 0 ? (start + consumed) % manifest.total : 0
-if (wrapped && checked >= all.length) state.sweeps = (state.sweeps ?? 0) + 1
-writeState(state)
 
+// Tombstones first, then the cursor. The reverse order loses findings on a crash between
+// the two writes: the cursor would say a window was swept while its results were never
+// recorded.
 for (const d of dead) known.add(d.id)
 writeTombstones({
   ids: [...known],
   note: tombstones.note,
   updatedAt: new Date().toISOString(),
 })
+
+state.sweepCursor = manifest.total > 0 ? (start + consumed) % manifest.total : 0
+if (manifest.total > 0 && wrapped && checked >= all.length) {
+  state.sweeps = (state.sweeps ?? 0) + 1
+}
+writeState(state)
 
 const byReason = dead.reduce(
   (acc, d) => ({ ...acc, [d.why]: (acc[d.why] ?? 0) + 1 }),
@@ -208,6 +228,8 @@ manifest.stats = {
     checked,
     removed: dead.length,
     byReason,
+    // Surfaced so CI can alarm on it: a refusal is not a crash, but it must not be quiet.
+    refused,
   },
   tombstoned: known.size,
   sweepCursor: state.sweepCursor,
@@ -223,6 +245,7 @@ console.log(
 console.log(
   `cursor: ${start} -> ${state.sweepCursor}` +
     (manifest.total > 0
-      ? ` (${Math.ceil(manifest.total / Math.max(window.length, 1))} run(s) per full pass)`
+      ? ` (${Math.ceil(manifest.total / Math.max(positionsScanned, 1))} run(s) per full pass)`
       : ''),
 )
+if (refused) console.log('sweep-refused: see the REFUSING line above')

@@ -6,11 +6,11 @@ Everything here exists to make that loud.
 
 ## Daily rhythm
 
-| When                   | What                                          | Where                           |
-| ---------------------- | --------------------------------------------- | ------------------------------- |
-| 08:17 UTC daily        | Harvest ~94 buckets, push to `pool`, redeploy | `.github/workflows/harvest.yml` |
-| On push to `main`      | Build + deploy the site                       | `.github/workflows/deploy.yml`  |
-| Nightly (with harvest) | Re-validation sweep                           | `harvest.yml` step              |
+| When                   | What                                         | Where                           |
+| ---------------------- | -------------------------------------------- | ------------------------------- |
+| 08:17 UTC daily        | Harvest ~89 buckets, sweep 25k records, push | `.github/workflows/harvest.yml` |
+| On push to `main`      | Build + deploy the site                      | `.github/workflows/deploy.yml`  |
+| Nightly (with harvest) | Re-validation sweep                          | `harvest.yml` step              |
 
 ## Branches
 
@@ -197,7 +197,7 @@ the right follow-up.
 ## Manual operations
 
 ```bash
-npm run harvest                      # spend the default 9500 units
+npm run harvest                      # spend the default 9000 units
 HARVEST_UNITS=1000 npm run harvest   # a small run
 npm run revalidate                   # sweep for dead/removed videos
 npm run pool-stats                   # regenerate the numbers in RANDOMNESS.md

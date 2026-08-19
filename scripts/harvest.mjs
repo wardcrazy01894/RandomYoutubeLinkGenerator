@@ -42,7 +42,9 @@ const envNum = (raw, fallback) => {
   return Number.isFinite(n) ? n : fallback
 }
 
-const UNIT_BUDGET = envNum(process.env.HARVEST_UNITS, 9500)
+// 9000, not 9500: the nightly sweep shares the same 10,000-unit day and takes 500,
+// and a 9500 default left the day with no margin at all for a retry.
+const UNIT_BUDGET = envNum(process.env.HARVEST_UNITS, 9000)
 const REHARVEST_SHARE = 0.3 // fraction of buckets spent re-drawing old ones (§3.3.5)
 // Safety quarantine keyed on UPLOAD age, not harvest age (docs/DESIGN.md §5.3).
 // YouTube's moderation lag applies to freshly uploaded videos; a 2019 upload gains
