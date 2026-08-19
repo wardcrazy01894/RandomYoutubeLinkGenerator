@@ -21,12 +21,21 @@ updates:
     # full gate set, and found to break the build. Re-check when typescript-eslint ships
     # support. (@eslint/js was here too until eslint 10 landed and unblocked it.)
     ignore:
+      # @types/node must track the RUNTIME, not npm's latest. .nvmrc is 22, and
+      # tsconfig has no `types` array, so these typings are ambient across src and
+      # tests — a major ahead of the runtime makes typecheck green-light APIs that
+      # throw on Node 22 in CI. Bump this deliberately when .nvmrc moves.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
       # typescript-eslint hard-errors on load under TS 7.0 ("does not support TS 7.0"),
       # which takes out `npm run lint` entirely. tsc itself was fine — typecheck, tests
       # and build all passed on 7.0.2. Tracking:
       # https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      # Version-scoped, not type-scoped: `update-types: semver-major` also silenced
+      # TS 6, which typescript-eslint 8 supports today (peer: >=4.8.4 <6.1.0). Only 7+
+      # is actually blocked, and only until typescript-eslint catches up.
       - dependency-name: typescript
-        update-types: ['version-update:semver-major']
+        versions: ['>=7']
 
   # Workflows pin actions by commit SHA with a version comment — Dependabot updates
   # both the SHA and the comment, so the pinning survives.

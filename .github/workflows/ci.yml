@@ -11,6 +11,13 @@ permissions:
   contents: read
   pull-requests: read
 
+# Each push to a PR branch otherwise starts a fresh set of four jobs while the previous
+# set is still running. Superseded runs on a branch are never interesting; the same is
+# NOT true of main, so cancellation is scoped to pull requests.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     name: build / typecheck / lint

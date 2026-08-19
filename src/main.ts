@@ -225,7 +225,16 @@ async function boot(): Promise<void> {
 
   els.draw.addEventListener('click', () => void draw())
   els.play.addEventListener('click', () => void play())
-  els.report.addEventListener('click', report)
+  // Without a contact address the Report control cannot send anything, and
+  // `report()` would silently do nothing — a dead safety affordance is worse than a
+  // visibly absent one. Reports deliberately do NOT fall back to public GitHub issues:
+  // that would build a searchable public index of the worst content on the site.
+  if (REPORT_TO) {
+    els.report.addEventListener('click', report)
+  } else {
+    els.report.hidden = true
+    console.warn('VITE_REPORT_EMAIL is unset — the Report control is hidden.')
+  }
   els.safe.addEventListener('change', () => {
     els.banner.hidden = els.safe.checked
     if (!els.safe.checked) {
