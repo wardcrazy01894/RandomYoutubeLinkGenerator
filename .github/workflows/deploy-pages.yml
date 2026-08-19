@@ -56,10 +56,12 @@ jobs:
           npm run format:check
           node scripts/check-pool.mjs
 
+      # No `enablement: true`: GITHUB_TOKEN cannot create a Pages site ("Resource not
+      # accessible by integration"), so it must be enabled once by an admin:
+      #   gh api -X POST repos/OWNER/REPO/pages -f build_type=workflow
+      # Documented in docs/OPERATIONS.md.
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-        with:
-          enablement: true
 
       - name: Build (vite)
         run: npm run build
