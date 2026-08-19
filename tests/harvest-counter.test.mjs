@@ -24,7 +24,7 @@ import { prefixAt, PREFIX_SPACE } from '../scripts/lib/prefix.mjs'
 // queried. These tests run the real harvest.mjs against a stubbed API and assert it.
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const KEY = 'RandomYoutubeLinkGenerator/v1' // must match FEISTEL_KEY's default
+const KEY = 'RandomYoutubeLinkGenerator/v1' // pinned into the child env below
 
 let dir, pool, log
 
@@ -67,6 +67,9 @@ function run(env = {}) {
         YOUTUBE_API_KEY: 'stub',
         POOL_DIR: pool,
         HARVEST_PACING_MS: '0',
+        // Pinned: an ambient HARVEST_KEY would otherwise change the prefix order and
+        // surface as a confusing "counted but never queried" failure.
+        HARVEST_KEY: KEY,
         STUB_LOG: log,
         ...env,
       },
@@ -195,9 +198,68 @@ describe('yield baseline', () => {
   })
 
   it('records the run shape so a truncated run is distinguishable from a full one', () => {
-    run({ HARVEST_UNITS: '3000', STUB_FAIL_AT: '2' })
+    const r = run({ HARVEST_UNITS: '3000', STUB_FAIL_AT: '2' })
+    expect(r.code, r.out).toBe(0)
     const h = manifest().health
     expect(h.truncated).toBe(true)
     expect(h.freshPlanned).toBeGreaterThan(h.freshAttempted)
+  })
+})
+
+describe('baseline escape hatch and truncation', () => {
+  // A truncated run is mostly re-harvest buckets, so its yield is unrepresentative.
+  // Letting it move the baseline reaches the same self-silencing state via 'ok'.
+  it('does not move the baseline on a truncated run', () => {
+    seed({ baselineYield: 4 })
+    // A non-zero counter is what makes re-harvest entries exist, so the run can still
+    // clear the 20-bucket threshold after abandoning its fresh plan.
+    writeFileSync(
+      join(pool, 'state.json'),
+      JSON.stringify({
+        counter: 400,
+        reharvestCursor: 0,
+        sweeps: 0,
+        totalBuckets: 400,
+      }),
+    )
+    // Yield must CLEAR the gate (3 > 4/2) so this is a truncated-but-healthy run — the
+    // case that would otherwise walk the baseline down while reporting 'ok'.
+    const r = run({
+      HARVEST_UNITS: '9000',
+      STUB_FAIL_AT: '1',
+      STUB_PER_BUCKET: '3',
+    })
+    expect(r.code, r.out).toBe(0)
+    const h = manifest().health
+    expect(h.truncated).toBe(true)
+    expect(h.baselineYield, 'a truncated run must not move the threshold').toBe(
+      4,
+    )
+  })
+
+  // Removing the decay removed the only self-recovery path, so the hatch must actually
+  // work — it has to bypass the GATE as well as recordHealth, or the run exits before
+  // writeState and relearns nothing.
+  it('relearns the baseline when explicitly reset', () => {
+    seed({ baselineYield: 5 })
+    const r = run({
+      HARVEST_UNITS: '2600',
+      STUB_PER_BUCKET: '1',
+      HARVEST_BASELINE_RESET: '1',
+    })
+    expect(r.code, r.out).toBe(0)
+    const h = manifest().health
+    expect(h.status).toBe('ok')
+    expect(
+      h.baselineYield,
+      'the hatch must relearn, not keep the old threshold',
+    ).toBe(1)
+  })
+
+  it('still fails without the reset, so the hatch is required to be deliberate', () => {
+    seed({ baselineYield: 5 })
+    const r = run({ HARVEST_UNITS: '2600', STUB_PER_BUCKET: '1' })
+    expect(r.code).toBe(1)
+    expect(manifest().health.baselineYield).toBe(5)
   })
 })

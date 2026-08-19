@@ -28,16 +28,21 @@ import {
 } from './lib/pool.mjs'
 import { loadKey } from './lib/env.mjs'
 
-const UNIT_BUDGET = Number(process.env.HARVEST_UNITS ?? 9500)
+const UNIT_BUDGET = Number(process.env.HARVEST_UNITS) || 9500
 const REHARVEST_SHARE = 0.3 // fraction of buckets spent re-drawing old ones (§3.3.5)
 // Safety quarantine keyed on UPLOAD age, not harvest age (docs/DESIGN.md §5.3).
 // YouTube's moderation lag applies to freshly uploaded videos; a 2019 upload gains
 // nothing from sitting a week just because we happened to draw it today. Keying on
 // harvest date would also have left the site empty for its first week.
 const MIN_UPLOAD_AGE_DAYS = 30
-const PACING_MS = Number(process.env.HARVEST_PACING_MS ?? 350) // per-minute rate limit
+const PACING_MS = Number(process.env.HARVEST_PACING_MS) || 350 // per-minute rate limit
 const MAX_PAGES = 3 // a k=5 bucket needing >150 results is anomalous; drop it
 const YIELD_FLOOR_RATIO = 0.5 // run-level yield below half baseline is fatal
+// Deliberately relearn the baseline instead of being measured against the stored one.
+// Must apply to BOTH the gate and recordHealth: applying it only to the latter would
+// leave the gate failing against the old baseline and exiting before writeState, so
+// nothing would ever be relearned. See docs/OPERATIONS.md.
+const BASELINE_RESET = Boolean(process.env.HARVEST_BASELINE_RESET)
 const FEISTEL_KEY = process.env.HARVEST_KEY ?? 'RandomYoutubeLinkGenerator/v1'
 
 // A known dash-token ID. If this stops resolving, YouTube changed the tokenizer and
@@ -59,6 +64,19 @@ const runStarted = new Date()
 console.log(
   `pool: ${manifest.total} videos, counter at ${state.counter}/${PREFIX_SPACE}`,
 )
+
+// Run-shape counters, declared before the canary so runShape() is safe to call from any
+// recordHealth site. The canary runs before the plan is built, so these bindings would
+// otherwise sit in the temporal dead zone there — a future edit adding runShape() to that
+// call would crash with a ReferenceError instead of recording the status.
+let freshCount = 0
+let freshAttempted = 0
+let reharvestAttempted = 0
+// The fresh counter may only advance over a CONTIGUOUS run of queried prefixes, because
+// state.counter is a single integer resume point. Once one fresh bucket fails, every
+// later success in this run must not be counted, or the failed prefix is skipped for good
+// while a later one gets queried twice.
+let freshHole = false
 
 // --- canary -----------------------------------------------------------------
 // Deliberately uninitialised: every path through the catch below either exits the
@@ -97,7 +115,7 @@ const reharvestCount = Math.min(
   Math.floor(affordable * REHARVEST_SHARE),
   state.counter,
 )
-const freshCount = affordable - reharvestCount
+freshCount = affordable - reharvestCount
 
 const plan = []
 for (let i = 0; i < freshCount && state.counter + i < PREFIX_SPACE; i++) {
@@ -116,13 +134,6 @@ console.log(
 // --- harvest ----------------------------------------------------------------
 const found = new Map()
 const priorCounter = state.counter
-let freshAttempted = 0
-let reharvestAttempted = 0
-// The fresh counter may only advance over a CONTIGUOUS run of queried prefixes, because
-// state.counter is a single integer resume point. Once one fresh bucket fails, every
-// later success in this run must not be counted, or the failed prefix is skipped for
-// good while a later one gets queried twice.
-let freshHole = false
 let bucketsDone = 0
 let unexhausted = 0
 let quotaHit = false
@@ -227,7 +238,9 @@ if (found.size > 0 && remaining() > 0) {
 }
 
 // --- validity gates ---------------------------------------------------------
-const baseline = manifest.health?.baselineYield ?? null
+const baseline = BASELINE_RESET
+  ? null
+  : (manifest.health?.baselineYield ?? null)
 if (baseline && bucketsDone >= 20 && yieldPer < baseline * YIELD_FLOOR_RATIO) {
   console.error(
     `FATAL: yield ${yieldPer.toFixed(2)}/bucket is below half the ${baseline.toFixed(2)} baseline.`,
@@ -302,14 +315,23 @@ function pct(rows, pred) {
 }
 
 function recordHealth(status, buckets, y, extra = {}) {
-  const prior = manifest.health?.baselineYield ?? null
+  // Removing the decay removed the only way a permanently-changed yield could unstick
+  // itself: a collapsed run now exits before writeState, so the same night repeats
+  // forever. That is correct — an alarm must not silence itself — but the operator needs
+  // a deliberate way to accept a new normal. See docs/OPERATIONS.md.
+  const prior = BASELINE_RESET ? null : (manifest.health?.baselineYield ?? null)
   // ONLY a healthy run may move the baseline. Folding a collapsed yield into it made the
   // gate self-silencing: each failed night dragged the baseline toward the broken value
   // (4.5 -> 3.7 -> ... -> 1.2), and once it fell below the residual yield the run started
   // reporting "ok" while harvesting a fraction of the buckets. That is exactly the
   // "succeeds quietly while producing nothing" mode CLAUDE.md says to design against,
   // reached by the alarm quietly lowering its own threshold.
-  const healthy = status === 'ok' || status === 'ok-quota-capped'
+  // A truncated run is unrepresentative by construction — it abandoned its fresh plan
+  // and is mostly re-harvest buckets — so letting it move the baseline walks the
+  // threshold down over successive nights, reaching the same self-silencing state via
+  // 'ok' rather than via failure.
+  const healthy =
+    (status === 'ok' || status === 'ok-quota-capped') && !freshHole
   manifest.health = {
     status,
     lastRunUtc: runStarted.toISOString(),

@@ -58,10 +58,31 @@ Videos per bucket collapsed. Either search coverage changed, or the API started 
 Compare against `npm run pool-stats` history. A single bad night can be noise — two in a
 row is a real signal.
 
-A failed run **does not move** `manifest.health.baselineYield`. That matters: folding a
-collapsed yield into the baseline made the alarm lower its own threshold, so repeated
-failures decayed it (4.5 → 3.7 → … → 1.2) until the run reported `ok` while harvesting a
-fraction of its buckets. The threshold you are compared against is the last healthy one.
+A failed or truncated run **does not move** `manifest.health.baselineYield`. That matters:
+folding a collapsed yield into the baseline let the alarm lower its own threshold, so
+repeated failures would decay it (4.5 → 3.7 → … → 1.2) until a run reported `ok` while
+harvesting a fraction of its buckets. The threshold you are compared against is always the
+last healthy, untruncated one.
+
+(In CI this decay was not actually reachable: a `yield-collapsed` run exits non-zero, so
+the publish step is skipped and the mutated manifest is discarded. It was reachable from a
+local `npm run harvest`, whose output a human then commits — and the guard is worth having
+regardless.)
+
+**The trade-off, and the escape hatch.** Because a collapsed run exits before `writeState`,
+nothing about it persists — so if the yield has genuinely and permanently changed, every
+subsequent night fails identically and the pool stops growing. That is deliberate: an alarm
+that quietly re-baselines itself is the failure this project is built to avoid. When you
+have looked at the numbers and accepted a new normal, relearn the baseline explicitly:
+
+```bash
+HARVEST_BASELINE_RESET=1 npm run harvest      # locally, or
+gh workflow run harvest.yml -f units=9500     # after clearing baselineYield on `pool`
+```
+
+`HARVEST_BASELINE_RESET=1` makes the run treat the stored baseline as absent, so it learns
+from this run instead of being measured against the old one. Use it deliberately, never on
+a schedule — on a schedule it reintroduces exactly the bug it replaced.
 
 ### The run says `ok` but the pool barely grew
 
