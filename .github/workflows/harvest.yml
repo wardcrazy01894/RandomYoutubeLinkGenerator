@@ -126,16 +126,28 @@ jobs:
       # A `::warning::` on an otherwise-green run notifies nobody — you only see it by
       # opening the run. Route this into the same harvester-health issue the hard
       # failures use, because that emails.
+      # Both steps are non-fatal by construction, for the same reason the sweep itself is:
+      # this is an informational post about a run that otherwise SUCCEEDED, and a failure
+      # here would skip Publish and discard the night's harvest — then file a "run failed"
+      # issue blaming the harvest for it. The detection swallows a missing or malformed
+      # manifest (the sweep runs under continue-on-error, so it may not have written one)
+      # and the report tolerates a GitHub API hiccup.
       - name: Did the sweep refuse its findings?
         id: sweep
         run: |
           node -e "
-            const m = require('./public/data/pool/manifest.json')
-            process.stdout.write('refused=' + (m.stats?.lastSweep?.refused === true))
+            let refused = false
+            try {
+              refused = require('./public/data/pool/manifest.json').stats?.lastSweep?.refused === true
+            } catch (e) {
+              console.error('could not read the sweep result: ' + e.message)
+            }
+            process.stdout.write('refused=' + refused + '\n')
           " >> "$GITHUB_OUTPUT"
 
       - name: Report a refused sweep
         if: steps.sweep.outputs.refused == 'true'
+        continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
