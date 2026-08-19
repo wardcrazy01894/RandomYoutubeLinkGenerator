@@ -64,6 +64,17 @@ The site self-monitors — it reads `manifest.generatedAt` and warns past 3 days
 that banner, the harvester has been failing silently. Check the Actions tab; the alarm
 issue should also exist.
 
+## First-time setup (one-off, needs admin)
+
+GitHub Pages must be enabled by a human before the first deploy — `GITHUB_TOKEN` is not
+allowed to create a Pages site, so `deploy-pages.yml` deliberately does not try:
+
+```bash
+gh api -X POST repos/wardcrazy01894/RandomYoutubeLinkGenerator/pages -f build_type=workflow
+gh secret set YOUTUBE_API_KEY --repo wardcrazy01894/RandomYoutubeLinkGenerator
+bash scripts/protect-main.sh
+```
+
 ## Kill switch
 
 If the site must go dark immediately:
