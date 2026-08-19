@@ -98,8 +98,17 @@ jobs:
               # them dropped them silently, and the next promotion put those deleted
               # videos back in front of viewers. Carry them across.
               cp public/data/pool/tombstones.json /tmp/branch-tombstones.json
+              # Same for state.json, for a different reason: it is the HARVESTER'S
+              # progress (Feistel counter, re-harvest and sweep cursors), and the branch
+              # is where that progress is made. main's copy is a published snapshot that
+              # can only be older. Restoring it re-sampled prefixes already drawn and
+              # re-swept windows already checked. Note this means manual intervention on
+              # the counter belongs on the `pool` branch, which is the only copy the
+              # harvester ever reads.
+              cp public/data/pool/state.json /tmp/branch-state.json
               rm -rf public/data/pool
               git checkout HEAD -- public/data/pool
+              mv /tmp/branch-state.json public/data/pool/state.json
               node scripts/merge-tombstones.mjs \
                 --base public/data/pool/tombstones.json \
                 --add /tmp/branch-tombstones.json \

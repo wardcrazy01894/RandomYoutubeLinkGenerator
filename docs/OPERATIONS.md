@@ -226,10 +226,14 @@ The site filters blocklisted IDs at draw time.
 
 ## Running the re-validation sweep (read this first)
 
-`npm run revalidate` writes `tombstones.json`, and unlike `blocklist.json` that file is
-**not** restored from `main`. Both workflows `rm -rf public/data/pool` and repopulate from
-the `pool` branch, so a sweep run against a plain checkout of `main` writes tombstones
-that are silently discarded on the next harvest or deploy.
+The sweep runs nightly inside the harvest job, so you rarely need to run it by hand.
+
+If you do: `npm run revalidate` writes `tombstones.json`. Run it against a checkout of the
+`pool` branch, not a plain checkout of `main` — the harvest repopulates `public/data/pool`
+from the branch each night, so tombstones written anywhere else are not where the
+harvester will look. They are no longer _lost_ if you get this wrong: the harvest's reset
+path merges tombstones in both directions. But they will not take effect until they reach
+the branch.
 
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
 copied back and forth:

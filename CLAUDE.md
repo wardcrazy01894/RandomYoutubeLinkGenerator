@@ -96,10 +96,13 @@ Keep these current in the same PR as the change:
   never report and it can never merge. That rule keys on the token, not on how the
   workflow was triggered, so dispatching it by hand does not change it — open the PR from
   a real account.
-- **Tombstones and the blocklist are removal records: merge them, never overwrite.**
-  Every path that copies a pool between `main` and `pool` goes through
-  `scripts/merge-tombstones.mjs`. A plain copy silently resurrected videos the sweep had
-  already found deleted.
+- **The two removal files are handled in opposite directions, deliberately.**
+  `blocklist.json` is **overwritten** from `main` on every copy — main wins wholesale, so
+  that deleting an id from it actually un-blocks the video. `tombstones.json` is
+  **merged** (`scripts/merge-tombstones.mjs`) — nothing ever un-tombstones, and a plain
+  copy silently resurrected videos the sweep had already found deleted. Do not "unify"
+  these: making the blocklist merge too is what made blocklist removal irreversible once
+  already.
 
 ## Every PR gets an adversarial review
 
