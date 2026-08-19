@@ -115,13 +115,15 @@ console.log(
 
 // --- harvest ----------------------------------------------------------------
 const found = new Map()
+let freshAttempted = 0
 let bucketsDone = 0
 let unexhausted = 0
 let quotaHit = false
 
-for (const { n } of plan) {
+for (const { n, fresh } of plan) {
   if (remaining() < COST.search * (MAX_PAGES + 1)) break
   await sleep(PACING_MS)
+  if (fresh) freshAttempted++
   const q = prefixAt(FEISTEL_KEY, n)
   try {
     const { ids, exhausted } = await harvestBucket(q)
@@ -211,7 +213,12 @@ const total = appendRecords(records, manifest.total)
 // so the whole pool is servable; the client still filters safety flags and tombstones.
 const servable = total
 
-state.counter = Math.min(state.counter + freshCount, PREFIX_SPACE)
+// Advance by prefixes we actually QUERIED, not by the number planned. The loop exits
+// early on budget exhaustion or quotaExceeded, and `affordable` assumes one page per
+// bucket while a bucket may cost up to MAX_PAGES. Advancing by the plan permanently
+// burned prefixes that were never sampled, silently shrinking the frame (P0 per
+// CLAUDE.md) — 15 of the first 38 were lost this way.
+state.counter = Math.min(state.counter + freshAttempted, PREFIX_SPACE)
 state.reharvestCursor =
   state.counter > 0
     ? (state.reharvestCursor + reharvestCount) % state.counter

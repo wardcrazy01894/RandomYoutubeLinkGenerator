@@ -29,11 +29,18 @@ jobs:
       # so overlay the branch version whenever it exists.
       - name: Overlay the live pool
         run: |
+          # pipefail matters here: without it a failing `git archive` still leaves tar
+          # exiting 0, `set -e` never fires, and the site deploys an EMPTY pool.
+          set -euo pipefail
           if git ls-remote --exit-code --heads origin pool >/dev/null 2>&1; then
             git fetch --depth=1 origin pool
             rm -rf public/data/pool
             mkdir -p public/data/pool
             git archive origin/pool | tar -x -C public/data/pool
+            test -f public/data/pool/manifest.json \
+              || { echo "Overlay produced no manifest.json — refusing to deploy"; exit 1; }
+            # main stays authoritative for the human-curated safety blocklist.
+            git show HEAD:public/data/pool/blocklist.json > public/data/pool/blocklist.json
             echo "Using pool branch: $(ls public/data/pool | wc -l) files"
           else
             echo "No pool branch yet — using the seed pool committed to main."

@@ -18,18 +18,21 @@ import {
   mkdirSync,
   readdirSync,
 } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const SHARD_SIZE = 1000
-export const POOL_DIR = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'public',
-  'data',
-  'pool',
-)
+// Overridable so the integrity guards can be exercised against fixtures in tests.
+export const POOL_DIR = process.env.POOL_DIR
+  ? resolve(process.env.POOL_DIR)
+  : join(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      'public',
+      'data',
+      'pool',
+    )
 
 const MANIFEST = join(POOL_DIR, 'manifest.json')
 const STATE = join(POOL_DIR, 'state.json')
@@ -101,6 +104,14 @@ export function appendRecords(records, total) {
     const room = SHARD_SIZE - offset
     const batch = queue.slice(0, room)
     queue = queue.slice(room)
+    // offset === 0 means "start a new shard". If a shard file is already there, the
+    // manifest disagrees with the data on disk (a lost or truncated manifest reports
+    // total 0), and writing would clobber up to SHARD_SIZE immutable records.
+    if (offset === 0 && existsSync(shardPath(shardIndex))) {
+      throw new Error(
+        `shard ${shardIndex} already exists but the manifest implies an empty pool — refusing to overwrite`,
+      )
+    }
     const existing = offset === 0 ? [] : readShard(shardIndex)
     if (existing.length !== offset) {
       throw new Error(

@@ -6,6 +6,7 @@
 // every PR and the harvester runs it before publishing.
 
 import { readdirSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { readManifest, readShard, POOL_DIR, SHARD_SIZE } from './lib/pool.mjs'
 
 const problems = []
@@ -16,7 +17,25 @@ if (!existsSync(POOL_DIR)) {
   process.exit(1)
 }
 
+// readManifest() falls back to a zero-record manifest when the file is missing, which
+// made every invariant below hold VACUOUSLY: an empty pool directory reported
+// "Pool OK: 0 records" and exited 0. That is precisely the state this gate exists to
+// stop — a failed restore could then publish an empty pool over a good one.
+if (!existsSync(join(POOL_DIR, 'manifest.json'))) {
+  console.error(
+    `manifest.json missing from ${POOL_DIR} — refusing to treat this as a valid pool`,
+  )
+  process.exit(1)
+}
+
 const manifest = readManifest()
+
+if (!(manifest.total > 0)) {
+  console.error(
+    `manifest.total is ${manifest.total} — an empty pool is never a valid publish`,
+  )
+  process.exit(1)
+}
 const shardFiles = readdirSync(POOL_DIR)
   .filter((f) => /^shard-\d+\.json$/.test(f))
   .sort()
