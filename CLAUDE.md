@@ -86,7 +86,10 @@ Keep these current in the same PR as the change:
 - Actions pinned by commit SHA with a version comment
 - `main` is protected: PR-only, 0 approvals, required checks
   `build / typecheck / lint`, `test`, `secret scan`, `pool integrity`
-- The `pool` branch is intentionally unprotected — see `docs/OPERATIONS.md`
+- `main` is the **source of truth**: the site is built from main's committed
+  `public/data/pool`. The `pool` branch is an unprotected staging area the nightly
+  harvest appends to; nothing there reaches viewers until `promote-pool.yml` opens a PR
+  and it merges. Never restore the build-time overlay — it made main decorative.
 
 ## Every PR gets an adversarial review
 

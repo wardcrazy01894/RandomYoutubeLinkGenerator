@@ -27,36 +27,10 @@ jobs:
 
       # The live pool lives on the `pool` branch. main carries only a small seed copy,
       # so overlay the branch version whenever it exists.
-      - name: Overlay the live pool
-        run: |
-          # pipefail matters here: without it a failing `git archive` still leaves tar
-          # exiting 0, `set -e` never fires, and the site deploys an EMPTY pool.
-          set -euo pipefail
-          set +e
-          git ls-remote --exit-code --heads origin pool >/dev/null 2>&1
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ]; then
-            git fetch --depth=1 origin pool
-            rm -rf public/data/pool
-            mkdir -p public/data/pool
-            git archive origin/pool | tar -x -C public/data/pool
-            test -f public/data/pool/manifest.json \
-              || { echo "Overlay produced no manifest.json — refusing to deploy"; exit 1; }
-            # main stays authoritative for the human-curated safety blocklist.
-            # Not an AND-list: set -e is exempt inside one, so mid-script a failure
-            # here would stop blocklist propagation with no signal at all.
-            git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
-              || { echo "Could not read blocklist.json from main — refusing to deploy"; exit 1; }
-            mv /tmp/blocklist.json public/data/pool/blocklist.json
-            echo "Using pool branch: $(ls public/data/pool | wc -l) files"
-          elif [ "$rc" -eq 2 ]; then
-            echo "No pool branch yet — using the seed pool committed to main."
-          else
-            echo "git ls-remote failed (exit $rc) — refusing to publish main's seed pool"
-            echo "over the live one on what may be a transient error."
-            exit 1
-          fi
+      # NOTE: the pool committed on `main` is what ships. This step used to overlay the
+      # `pool` branch on top, which meant the live site served data that had never been
+      # merged — main's copy was decorative. Nightly harvesting still accumulates on
+      # `pool`, but nothing reaches viewers until a promotion PR lands on main.
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

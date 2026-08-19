@@ -12,10 +12,34 @@ Everything here exists to make that loud.
 | On push to `main`      | Build + deploy the site                      | `.github/workflows/deploy.yml`  |
 | Nightly (with harvest) | Re-validation sweep                          | `harvest.yml` step              |
 
+## Promoting the pool into `main`
+
+`main` is the source of truth — the deploy builds from its committed `public/data/pool`,
+so a night's harvest is invisible to viewers until it is promoted. To publish accumulated
+data:
+
+```bash
+gh workflow run promote-pool.yml --repo wardcrazy01894/RandomYoutubeLinkGenerator
+```
+
+That opens a PR whose body carries the numbers that matter (videos before/after, how many
+added, how many tombstoned) — read those rather than the shard diff, which is
+machine-generated. `pool integrity` gates the structural invariants, and the workflow
+additionally refuses to promote a pool that has _shrunk_, since the pool is append-only.
+`blocklist.json` is taken from `main`, never the branch, so a promotion cannot resurrect
+an id removed here.
+
+Merging it triggers `deploy.yml`, and the site serves the new pool.
+
+Afterwards the branch resets itself: the next harvest notices main has caught up
+(`main total >= pool total`), starts the delta again from main, and recreates the branch.
+So `pool` only ever holds what has accumulated since the last promotion.
+
 ## Branches
 
 - **`main`** — protected. All changes via PR, required checks, no force-push.
-- **`pool`** — deliberately unprotected. The harvester commits on top of it each
+- **`pool`** — deliberately unprotected **staging**, not what the site serves. The
+  harvester commits on top of it each
   night and fast-forwards; it is not force-pushed, so every run is a reviewable
   commit you can diff or revert.
 

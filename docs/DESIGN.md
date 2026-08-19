@@ -304,8 +304,15 @@ never report and every nightly PR would be **permanently unmergeable** — 365 o
 a pool that never grew. GitHub would also disable the cron after 60 days of "inactivity".
 
 The harvester therefore pushes straight to an unprotected `pool` branch. `main` stays
-protected and churn-free. Deploy is extracted into a `workflow_call` reusable workflow
-that both `deploy.yml` and `harvest.yml` invoke.
+protected and churn-free.
+
+**`main` is the source of truth.** The deploy builds from main's committed
+`public/data/pool`, so a night's harvest changes nothing a viewer sees until it has been
+promoted. An earlier version overlaid the branch on top at build time, which meant the
+live site served data that had never been merged and main's copy was decorative — exactly
+backwards. `promote-pool.yml` (dispatched by a human, so CI actually runs on the PR it
+opens) copies the branch into a promotion branch and proposes it; merging that fires the
+deploy. The branch is a staging area, and it is reset once a promotion lands.
 
 The nightly commit **extends** that branch's history rather than replacing it: the job
 clones `pool` (with its `.git`), swaps in the run's output, and fast-forwards. An earlier

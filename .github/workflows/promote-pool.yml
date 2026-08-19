@@ -1,0 +1,131 @@
+name: promote-pool
+
+# Bring the nightly harvest's accumulated data from the `pool` branch into `main`.
+#
+# `main` is the source of truth: deploy-pages builds from main's committed
+# public/data/pool, so nothing a harvest collects is visible to viewers until it has been
+# promoted here and merged. That is the point — the branch is a staging area, not a
+# parallel truth.
+#
+# This opens a PR rather than pushing. A PR from a HUMAN-dispatched workflow gets real CI
+# runs, unlike a GITHUB_TOKEN-created one (which fires no `pull_request` event and can
+# therefore never satisfy the required checks). Merging it triggers deploy.yml, and the
+# site updates.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: promote-pool
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Copy the pool branch into a promotion branch
+        id: copy
+        run: |
+          set -euo pipefail
+          set +e
+          git ls-remote --exit-code --heads origin pool >/dev/null 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 2 ]; then
+            echo "No `pool` branch — nothing to promote."; exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "git ls-remote failed (exit $rc) — aborting rather than guessing"; exit 1
+          fi
+
+          BEFORE=$(node -e "console.log(require('./public/data/pool/manifest.json').total)")
+
+          git fetch --depth=1 origin pool
+          rm -rf public/data/pool && mkdir -p public/data/pool
+          git archive origin/pool | tar -x -C public/data/pool
+          test -f public/data/pool/manifest.json \
+            || { echo "pool branch has no manifest.json — refusing"; exit 1; }
+
+          # main stays authoritative for the human-curated blocklist: a promotion must
+          # never resurrect an id someone removed on main.
+          git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
+            || { echo "could not read blocklist.json from main"; exit 1; }
+          mv /tmp/blocklist.json public/data/pool/blocklist.json
+
+          AFTER=$(node -e "console.log(require('./public/data/pool/manifest.json').total)")
+          TOMB=$(node -e "console.log(require('./public/data/pool/tombstones.json').ids.length)")
+
+          if [ "$AFTER" -lt "$BEFORE" ]; then
+            echo "REFUSING: promotion would shrink the pool ($BEFORE -> $AFTER)."
+            echo "The pool is append-only; a smaller branch means something is wrong."
+            exit 1
+          fi
+
+          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          echo "after=$AFTER"   >> "$GITHUB_OUTPUT"
+          echo "added=$((AFTER - BEFORE))" >> "$GITHUB_OUTPUT"
+          echo "tombstoned=$TOMB" >> "$GITHUB_OUTPUT"
+
+      - name: Verify pool invariants before proposing
+        run: node scripts/check-pool.mjs
+
+      - name: Open the promotion PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEFORE: ${{ steps.copy.outputs.before }}
+          AFTER: ${{ steps.copy.outputs.after }}
+          ADDED: ${{ steps.copy.outputs.added }}
+          TOMBSTONED: ${{ steps.copy.outputs.tombstoned }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- public/data/pool; then
+            echo "main is already up to date with the pool branch — nothing to promote."
+            exit 0
+          fi
+
+          BRANCH="promote/pool-$(date -u +%Y%m%d-%H%M%S)"
+          git config user.name  "harvest-bot"
+          git config user.email "harvest-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add public/data/pool
+          git commit -q -m "Promote pool: ${BEFORE} -> ${AFTER} videos"
+          git push -q origin "$BRANCH"
+
+          # Body written to a file rather than inlined: a heredoc nested inside command
+          # substitution inside YAML is unparseable by prettier and easy to break.
+          {
+            echo "Brings the nightly harvest's accumulated data from the \`pool\` branch into \`main\`."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| videos before | ${BEFORE} |"
+            echo "| videos after | ${AFTER} |"
+            echo "| added | **+${ADDED}** |"
+            echo "| tombstoned | ${TOMBSTONED} |"
+            echo
+            echo "The diff is machine-generated shard data — read the numbers above rather than"
+            echo "the files. \`pool integrity\` gates the structural invariants (shard sizes, id"
+            echo "format, no duplicates, counts matching the manifest), and this workflow refuses"
+            echo "to promote a pool that has shrunk."
+            echo
+            echo "\`blocklist.json\` is taken from \`main\`, not the branch, so a promotion can never"
+            echo "resurrect an id removed here."
+            echo
+            echo "Merging this triggers a deploy, and the site serves the new pool."
+          } > /tmp/promote-body.md
+
+          gh pr create \
+            --title "Promote pool: +${ADDED} videos (${AFTER} total)" \
+            --body-file /tmp/promote-body.md \
+            --head "$BRANCH" --base main

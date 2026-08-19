@@ -78,6 +78,18 @@ jobs:
             # The extract above cannot fail loudly on its own, so assert the result.
             test -f public/data/pool/manifest.json \
               || { echo "Restore produced no manifest.json — refusing to continue"; exit 1; }
+            # If a promotion has landed, main already contains everything this branch had.
+            # Continuing on the stale branch would make the NEXT promotion copy a smaller
+            # pool over main — silent data loss. Start the delta again from main instead.
+            MAIN_TOTAL=$(git show HEAD:public/data/pool/manifest.json \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).total))')
+            POOL_TOTAL=$(node -e "console.log(require('./public/data/pool/manifest.json').total)")
+            if [ "$MAIN_TOTAL" -ge "$POOL_TOTAL" ]; then
+              echo "main ($MAIN_TOTAL) has caught up with pool ($POOL_TOTAL) — a promotion landed."
+              echo "Restarting the delta from main and recreating the branch."
+              rm -rf .pool-branch
+              git checkout HEAD -- public/data/pool
+            fi
             echo "Restored $(ls public/data/pool | wc -l) files from the pool branch"
           elif [ "$rc" -eq 2 ]; then
             echo "No pool branch yet — it will be created from the seed in main."
@@ -261,7 +273,6 @@ jobs:
               })
             }
 
-  publish:
-    needs: harvest
-    if: success()
-    uses: ./.github/workflows/deploy-pages.yml
+  # Deliberately no publish job. `main` is the source of truth: deploy-pages builds from
+  # main's committed pool, so a harvest changes nothing a viewer sees until it has been
+  # promoted (see promote-pool.yml) and merged. The branch is a staging area.
