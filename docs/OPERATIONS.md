@@ -58,6 +58,19 @@ Videos per bucket collapsed. Either search coverage changed, or the API started 
 Compare against `npm run pool-stats` history. A single bad night can be noise — two in a
 row is a real signal.
 
+A failed run **does not move** `manifest.health.baselineYield`. That matters: folding a
+collapsed yield into the baseline made the alarm lower its own threshold, so repeated
+failures decayed it (4.5 → 3.7 → … → 1.2) until the run reported `ok` while harvesting a
+fraction of its buckets. The threshold you are compared against is the last healthy one.
+
+### The run says `ok` but the pool barely grew
+
+Check `manifest.health.truncated`. A run that hits a bucket failure abandons the rest of
+its fresh plan — deliberately, because committing records against a frozen counter
+poisons the next run's yield — so it can succeed with far fewer buckets than planned.
+`freshPlanned` vs `freshAttempted` shows how much was skipped. One such night is normal
+after a transient API error; several in a row means something is reliably failing.
+
 ### `quotaExceeded`
 
 Not a failure. The 10,000 unit/day cap is a hard stop with no charge attached; the run

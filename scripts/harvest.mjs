@@ -35,7 +35,7 @@ const REHARVEST_SHARE = 0.3 // fraction of buckets spent re-drawing old ones (§
 // nothing from sitting a week just because we happened to draw it today. Keying on
 // harvest date would also have left the site empty for its first week.
 const MIN_UPLOAD_AGE_DAYS = 30
-const PACING_MS = 350 // stay under the per-minute rate limit
+const PACING_MS = Number(process.env.HARVEST_PACING_MS ?? 350) // per-minute rate limit
 const MAX_PAGES = 3 // a k=5 bucket needing >150 results is anomalous; drop it
 const YIELD_FLOOR_RATIO = 0.5 // run-level yield below half baseline is fatal
 const FEISTEL_KEY = process.env.HARVEST_KEY ?? 'RandomYoutubeLinkGenerator/v1'
@@ -232,7 +232,7 @@ if (baseline && bucketsDone >= 20 && yieldPer < baseline * YIELD_FLOOR_RATIO) {
   console.error(
     `FATAL: yield ${yieldPer.toFixed(2)}/bucket is below half the ${baseline.toFixed(2)} baseline.`,
   )
-  recordHealth('yield-collapsed', bucketsDone, yieldPer)
+  recordHealth('yield-collapsed', bucketsDone, yieldPer, runShape())
   process.exit(1)
 }
 
@@ -273,26 +273,56 @@ manifest.stats = {
   ageRestrictedPct: pct(records, (r) => r.age),
   minUploadAgeDays: MIN_UPLOAD_AGE_DAYS,
 }
-recordHealth(quotaHit ? 'ok-quota-capped' : 'ok', bucketsDone, yieldPer)
+recordHealth(
+  quotaHit ? 'ok-quota-capped' : 'ok',
+  bucketsDone,
+  yieldPer,
+  runShape(),
+)
 
 console.log(`pool now ${total} videos (${servable} servable)`)
 console.log(`spent ~${units} quota units`)
+
+/**
+ * What this run actually did, as opposed to what it planned. Without this, a run that
+ * abandoned its fresh plan after one failure is indistinguishable from a complete one.
+ */
+function runShape() {
+  return {
+    freshPlanned: freshCount,
+    freshAttempted,
+    reharvestAttempted,
+    truncated: freshHole,
+  }
+}
 
 function pct(rows, pred) {
   if (rows.length === 0) return null
   return Math.round((rows.filter(pred).length / rows.length) * 1000) / 10
 }
 
-function recordHealth(status, buckets, y) {
+function recordHealth(status, buckets, y, extra = {}) {
   const prior = manifest.health?.baselineYield ?? null
+  // ONLY a healthy run may move the baseline. Folding a collapsed yield into it made the
+  // gate self-silencing: each failed night dragged the baseline toward the broken value
+  // (4.5 -> 3.7 -> ... -> 1.2), and once it fell below the residual yield the run started
+  // reporting "ok" while harvesting a fraction of the buckets. That is exactly the
+  // "succeeds quietly while producing nothing" mode CLAUDE.md says to design against,
+  // reached by the alarm quietly lowering its own threshold.
+  const healthy = status === 'ok' || status === 'ok-quota-capped'
   manifest.health = {
     status,
     lastRunUtc: runStarted.toISOString(),
     buckets,
     yield: y,
-    // Slow-moving baseline so the yield gate adapts rather than drifting into false alarms.
+    // Slow-moving so the gate adapts to real drift rather than firing on noise.
     baselineYield:
-      y != null && buckets >= 20 ? (prior ? prior * 0.8 + y * 0.2 : y) : prior,
+      healthy && y != null && buckets >= 20
+        ? prior
+          ? prior * 0.8 + y * 0.2
+          : y
+        : prior,
+    ...extra,
   }
   writeManifest(manifest)
 }
