@@ -31,6 +31,20 @@ const EXTENSIONS = [
 /** Math.random, Math?.random, Math['random'] — with arbitrary whitespace. */
 const FORBIDDEN = /Math\s*(?:\??\s*\.\s*random\b|\[\s*['"`]random['"`]\s*\])/
 
+// Alias form is otherwise covered ONLY by the lint selectors, which makes this layer
+// depend on how ESLint happens to be invoked: narrowing `npm run lint` from `eslint .`
+// to `eslint src` stops CI linting scripts/ at all, and an aliased Math.random in the
+// Feistel sampler then passes both layers. Detecting the alias here keeps layer 2
+// independent of any ESLint invocation.
+// Deliberately narrow: `Math` must not be followed by `.`, `[` or a word character, so
+// `Math.floor(...)` and `Mathematics` do not match.
+const ALIAS_FORMS = [
+  /(?:const|let|var)\s+[\w$]+\s*=\s*Math\s*(?![.[\w$])/,
+  /(?:const|let|var)\s*\{[^}]*\brandom\b[^}]*\}\s*=\s*Math\b/,
+]
+const forbidden = (text) =>
+  FORBIDDEN.test(text) || ALIAS_FORMS.some((re) => re.test(text))
+
 // Every accidental form, in one snippet. Each line must draw its own complaint.
 const OFFENDING = [
   // Prepended deliberately: if a later block re-enables inline config for some glob,
@@ -45,7 +59,10 @@ const OFFENDING = [
   'const { random } = Math',
 ].join('\n')
 
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', 'public'])
+// `public` is deliberately NOT skipped: public/data is ESLint-ignored, so a source file
+// there would be invisible to both layers. Nothing lives there today, so walking it costs
+// nothing.
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage'])
 
 function walk(dir) {
   const out = []
@@ -116,23 +133,32 @@ describe('Math.random is absent from the randomness-critical source', () => {
   it.each(SCANNED)('finds no Math.random under %s/', (dirName) => {
     const offenders = sourceFiles
       .filter((f) => f.startsWith(join(ROOT, dirName)))
-      .filter((f) => FORBIDDEN.test(readFileSync(f, 'utf8')))
+      .filter((f) => forbidden(readFileSync(f, 'utf8')))
       .map(rel)
     expect(offenders).toEqual([])
   })
 
   it('detects the patterns it claims to detect', () => {
     for (const sample of [
+      'const M = Math',
+      'const { random } = Math',
       'const x = Math.random()',
       "const x = Math['random']()",
       'const x = Math . random ()',
       'const x = Math[ "random" ]()',
       'const x = Math?.random()',
     ]) {
-      expect(FORBIDDEN.test(sample)).toBe(true)
+      expect(forbidden(sample), `should be detected: ${sample}`).toBe(true)
     }
-    for (const ok of ['Math.floor(1.5)', 'Math.min(a, b)', 'randomBelow(10)']) {
-      expect(FORBIDDEN.test(ok)).toBe(false)
+    // Legitimate Math usage must stay clean, or the layer becomes noise people disable.
+    for (const ok of [
+      'Math.floor(1.5)',
+      'Math.min(a, b)',
+      'randomBelow(10)',
+      'const x = Math.floor(n / K)',
+      'const limit = 2 ** 32 - (2 ** 32 % n)',
+    ]) {
+      expect(forbidden(ok), `must not be flagged: ${ok}`).toBe(false)
     }
   })
 })
