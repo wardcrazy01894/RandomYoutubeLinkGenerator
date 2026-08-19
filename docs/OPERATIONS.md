@@ -22,18 +22,33 @@ data:
 gh workflow run promote-pool.yml --repo wardcrazy01894/RandomYoutubeLinkGenerator
 ```
 
-That opens a PR whose body carries the numbers that matter (videos before/after, how many
-added, how many tombstoned) — read those rather than the shard diff, which is
-machine-generated. `pool integrity` gates the structural invariants, and the workflow
-additionally refuses to promote a pool that has _shrunk_, since the pool is append-only.
-`blocklist.json` is taken from `main`, never the branch, so a promotion cannot resurrect
-an id removed here.
+It pushes a `promote/pool` branch and stops there. **You open the PR** — the run summary
+prints a one-click compare link, or:
+
+```bash
+gh pr create --repo wardcrazy01894/RandomYoutubeLinkGenerator \
+  --head promote/pool --base main --title "Promote pool" --fill
+```
+
+The workflow cannot open it for you: a PR created with `GITHUB_TOKEN` fires no
+`pull_request` event, so the required checks never report and it could never be merged.
+That rule keys on the token, so dispatching the workflow by hand does not help.
+
+The run summary carries the numbers that matter (videos before/after, how many added, how
+many tombstoned) — read those rather than the shard diff, which is machine-generated.
+`pool integrity` gates the structural invariants, and the workflow additionally refuses to
+promote a pool that has _shrunk_, since the pool is append-only. `blocklist.json` is taken
+from `main`, never the branch, so a promotion cannot resurrect an id removed here.
+
+Re-dispatching force-pushes `promote/pool`, which updates an already-open PR rather than
+leaving a second one behind.
 
 Merging it triggers `deploy.yml`, and the site serves the new pool.
 
-Afterwards the branch resets itself: the next harvest notices main has caught up
-(`main total >= pool total`), starts the delta again from main, and recreates the branch.
-So `pool` only ever holds what has accumulated since the last promotion.
+Afterwards the branch resets its DATA: the next harvest notices main has caught up
+(`main total >= pool total`) and restarts the delta from main, committing that reset onto
+the same branch. So `pool` only ever holds what has accumulated since the last promotion.
+Its git history is never discarded — the push is always a fast-forward.
 
 ## Branches
 

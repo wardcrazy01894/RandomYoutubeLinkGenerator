@@ -1,21 +1,21 @@
 {
   "version": 1,
   "shardSize": 1000,
-  "total": 79,
-  "servable": 79,
-  "generatedAt": "2026-08-19T16:33:05.871Z",
+  "total": 105,
+  "servable": 105,
+  "generatedAt": "2026-08-19T17:25:29.721Z",
   "health": {
     "status": "ok",
-    "lastRunUtc": "2026-08-19T16:33:05.871Z",
-    "buckets": 19,
-    "yield": 4.2631578947368425,
+    "lastRunUtc": "2026-08-19T17:25:29.721Z",
+    "buckets": 3,
+    "yield": 7.333333333333333,
     "baselineYield": null
   },
   "stats": {
     "prefixLength": 5,
     "prefixSpace": 39357381,
-    "bucketsEverDrawn": 19,
-    "embeddablePct": 98.7,
+    "bucketsEverDrawn": 23,
+    "embeddablePct": 100,
     "ageRestrictedPct": 0,
     "minUploadAgeDays": 30
   }

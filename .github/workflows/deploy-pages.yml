@@ -1,8 +1,7 @@
 name: deploy-pages (reusable)
 
-# Extracted so BOTH the push-to-main deploy and the nightly harvest can publish.
-# The harvester pushes data to the `pool` branch with GITHUB_TOKEN, which by design
-# does not trigger other workflows — so it has to call this directly.
+# Reusable, but `main` is now its only caller: what is committed on main is what ships.
+# The nightly harvest deliberately cannot reach it — see .github/workflows/harvest.yml.
 on:
   workflow_call:
 
@@ -25,8 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The live pool lives on the `pool` branch. main carries only a small seed copy,
-      # so overlay the branch version whenever it exists.
       # NOTE: the pool committed on `main` is what ships. This step used to overlay the
       # `pool` branch on top, which meant the live site served data that had never been
       # merged — main's copy was decorative. Nightly harvesting still accumulates on
@@ -40,8 +37,9 @@ jobs:
 
       - run: npm ci
 
-      # A workflow_dispatch or harvest-triggered deploy is not gated by branch
-      # protection, so re-run the gates here rather than publishing an untested tree.
+      # A workflow_dispatch deploy is not gated by branch protection, so re-run the gates
+      # here rather than publishing an untested tree. (The harvest can no longer reach
+      # this workflow at all, but a dispatch still can.)
       - name: Deploy gate
         run: |
           npm test

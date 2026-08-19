@@ -1,23 +1,26 @@
 name: promote-pool
 
-# Bring the nightly harvest's accumulated data from the `pool` branch into `main`.
+# Stage the nightly harvest's accumulated data for merge into `main`.
 #
 # `main` is the source of truth: deploy-pages builds from main's committed
 # public/data/pool, so nothing a harvest collects is visible to viewers until it has been
-# promoted here and merged. That is the point — the branch is a staging area, not a
-# parallel truth.
+# promoted and merged. The `pool` branch is a staging area, not a parallel truth.
 #
-# This opens a PR rather than pushing. A PR from a HUMAN-dispatched workflow gets real CI
-# runs, unlike a GITHUB_TOKEN-created one (which fires no `pull_request` event and can
-# therefore never satisfy the required checks). Merging it triggers deploy.yml, and the
-# site updates.
+# This workflow PREPARES and PUSHES a promotion branch. It deliberately does NOT open the
+# pull request, because it would have to do so as GITHUB_TOKEN, and a PR created by
+# GITHUB_TOKEN fires no `pull_request` event — the required checks on `main` would never
+# report and the PR could never be merged. GitHub keys that rule on the TOKEN, not on how
+# the workflow was triggered, so a human dispatch does not change it. The final step
+# prints a one-click compare link; opening the PR from a real account is what gets it CI.
 
 on:
   workflow_dispatch:
 
+# Read-only except for pushing the promotion branch. No `pull-requests: write`: this
+# workflow does not create PRs, and holding the permission would only invite someone to
+# re-add the call that cannot work.
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: promote-pool
@@ -35,7 +38,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: Copy the pool branch into a promotion branch
+      - run: npm ci
+
+      - name: Copy the pool branch over main's pool
         id: copy
         run: |
           set -euo pipefail
@@ -44,7 +49,7 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -eq 2 ]; then
-            echo "No `pool` branch — nothing to promote."; exit 1
+            echo 'No `pool` branch exists — nothing to promote.'; exit 1
           elif [ "$rc" -ne 0 ]; then
             echo "git ls-remote failed (exit $rc) — aborting rather than guessing"; exit 1
           fi
@@ -72,17 +77,18 @@ jobs:
             exit 1
           fi
 
-          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
-          echo "after=$AFTER"   >> "$GITHUB_OUTPUT"
-          echo "added=$((AFTER - BEFORE))" >> "$GITHUB_OUTPUT"
-          echo "tombstoned=$TOMB" >> "$GITHUB_OUTPUT"
+          {
+            echo "before=$BEFORE"
+            echo "after=$AFTER"
+            echo "added=$((AFTER - BEFORE))"
+            echo "tombstoned=$TOMB"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Verify pool invariants before proposing
         run: node scripts/check-pool.mjs
 
-      - name: Open the promotion PR
+      - name: Push the promotion branch
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BEFORE: ${{ steps.copy.outputs.before }}
           AFTER: ${{ steps.copy.outputs.after }}
           ADDED: ${{ steps.copy.outputs.added }}
@@ -90,22 +96,22 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet -- public/data/pool; then
-            echo "main is already up to date with the pool branch — nothing to promote."
+            echo "main is already up to date with the pool branch — nothing to promote." \
+              >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          BRANCH="promote/pool-$(date -u +%Y%m%d-%H%M%S)"
+          # A single fixed branch, force-pushed. Dated branch names accumulated one dead
+          # branch per dispatch; a fixed name means a re-run simply updates the open PR.
           git config user.name  "harvest-bot"
           git config user.email "harvest-bot@users.noreply.github.com"
-          git checkout -b "$BRANCH"
+          git checkout -B promote/pool
           git add public/data/pool
           git commit -q -m "Promote pool: ${BEFORE} -> ${AFTER} videos"
-          git push -q origin "$BRANCH"
+          git push -q --force origin promote/pool
 
-          # Body written to a file rather than inlined: a heredoc nested inside command
-          # substitution inside YAML is unparseable by prettier and easy to break.
           {
-            echo "Brings the nightly harvest's accumulated data from the \`pool\` branch into \`main\`."
+            echo "## Promotion branch pushed"
             echo
             echo "| | |"
             echo "|---|---|"
@@ -114,18 +120,15 @@ jobs:
             echo "| added | **+${ADDED}** |"
             echo "| tombstoned | ${TOMBSTONED} |"
             echo
-            echo "The diff is machine-generated shard data — read the numbers above rather than"
-            echo "the files. \`pool integrity\` gates the structural invariants (shard sizes, id"
-            echo "format, no duplicates, counts matching the manifest), and this workflow refuses"
-            echo "to promote a pool that has shrunk."
+            echo "**Open the PR from your own account** (a PR opened by this workflow would"
+            echo "get no CI and could never be merged):"
             echo
-            echo "\`blocklist.json\` is taken from \`main\`, not the branch, so a promotion can never"
-            echo "resurrect an id removed here."
+            echo "<${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...promote/pool?expand=1>"
             echo
-            echo "Merging this triggers a deploy, and the site serves the new pool."
-          } > /tmp/promote-body.md
-
-          gh pr create \
-            --title "Promote pool: +${ADDED} videos (${AFTER} total)" \
-            --body-file /tmp/promote-body.md \
-            --head "$BRANCH" --base main
+            echo "If a promotion PR is already open, the force-push above just updated it."
+            echo
+            echo "The diff is machine-generated shard data — read the numbers above rather"
+            echo "than the files. \`pool integrity\` gates the structural invariants, and this"
+            echo "workflow refuses to promote a pool that has shrunk. \`blocklist.json\` is"
+            echo "taken from \`main\`, so a promotion cannot resurrect an id removed there."
+          } >> "$GITHUB_STEP_SUMMARY"
