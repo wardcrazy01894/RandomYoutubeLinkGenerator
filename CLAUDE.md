@@ -51,6 +51,26 @@ Keep these current in the same PR as the change:
   `build / typecheck / lint`, `test`, `secret scan`
 - The `pool` branch is intentionally unprotected — see `docs/OPERATIONS.md`
 
+## Every PR gets an adversarial review
+
+Before merging — however small the change — run the `adversarial-reviewer` agent against
+the actual diff, with the specific failure modes to hunt for. Fix or explicitly dismiss
+each finding with a reason, then merge.
+
+This is not ceremony. The adversarial passes have caught, in this repo alone: a nightly
+PR flow that would have deadlocked permanently, a relevance-ranked truncation that
+reintroduced popularity bias, and a force-push that silently destroyed the pool's git
+history. Small "obvious" PRs are exactly where the habit lapses, and a one-line workflow
+edit is how the orphan-commit bug shipped.
+
+**Green CI is not evidence of correctness for anything CI does not exercise** — the
+deploy and harvest workflows only run on `main` and on cron, so a PR can be fully green
+and still break them.
+
+Dependency bumps count. Install them and run the full gate set locally rather than
+trusting Dependabot's green check: TypeScript 7 passed typecheck, all tests and the build,
+while breaking `typescript-eslint` (and therefore `npm run lint`) outright.
+
 ## Before opening a PR
 
 ```bash

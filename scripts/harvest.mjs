@@ -61,7 +61,9 @@ console.log(
 )
 
 // --- canary -----------------------------------------------------------------
-let canaryOk = false
+// Deliberately uninitialised: every path through the catch below either exits the
+// process or rethrows, so a default value would never be observed.
+let canaryOk
 try {
   const { ids } = await searchPage(key, CANARY.token)
   spend(COST.search)
