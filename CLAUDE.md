@@ -43,7 +43,8 @@ nothing crashes and every test passes.
    switched off by a bare `eslint-disable` comment; by re-enabling inline config for one
    glob after `noInlineConfig` was set; and by narrowing `npm run lint` itself so CI stops
    linting a directory. The probe carries a disable comment and runs
-   against every file ESLint lints, so all seven surface. That is a list of what is
+   against every file ESLint lints, so the first seven surface there; the eighth is why
+   the text scan detects aliasing itself rather than deferring to ESLint. That is a list of what is
    checked, not a claim that nothing else is possible.
 
    That belt-and-braces is deliberate: this guard was previously scoped to `src/**/*.ts`

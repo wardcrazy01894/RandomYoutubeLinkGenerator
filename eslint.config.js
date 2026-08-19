@@ -26,8 +26,11 @@ export default tseslint.config(
     // this guard came to cover only src/**/*.ts. Extend this array instead.
     // Inline comments cannot switch this off. Without it, a single
     // `/* eslint-disable no-restricted-syntax */` at the top of a new file disarms the
-    // guard with no config change at all — and the text-scan layer cannot see the alias
-    // form, so nothing would catch it. The repo uses no disable comments; if one ever
+    // guard with no config change at all — and for any file outside src/, scripts/ and
+    // public/ the text-scan layer does not run, so nothing would catch it. (Inside those
+    // trees the text scan does detect declaration-form aliasing independently; do not
+    // read this comment as a reason to delete that.) The repo uses no disable comments;
+    // if one ever
     // becomes genuinely necessary, it has to be argued for here rather than added
     // silently in a source file.
     linterOptions: { noInlineConfig: true },
