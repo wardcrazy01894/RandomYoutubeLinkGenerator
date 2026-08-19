@@ -47,14 +47,22 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # Clone the branch WITH its .git so tonight's commit can be a CHILD of the
+      # existing history. The previous version exported a bare snapshot and later
+      # force-pushed an orphan commit, which left the pool branch permanently one
+      # commit deep: no diffs between runs and no way to roll back a bad harvest.
       - name: Restore the live pool from the `pool` branch
         run: |
           if git ls-remote --exit-code --heads origin pool >/dev/null 2>&1; then
-            git fetch --depth=1 origin pool
+            git clone --quiet --branch pool --single-branch --depth=1 \
+              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+              .pool-branch
             rm -rf public/data/pool && mkdir -p public/data/pool
-            git archive origin/pool | tar -x -C public/data/pool
+            find .pool-branch -mindepth 1 -maxdepth 1 ! -name .git \
+              -exec cp -R {} public/data/pool/ \;
+            echo "Restored $(ls public/data/pool | wc -l) files from the pool branch"
           else
-            echo "No pool branch yet — seeding from main."
+            echo "No pool branch yet — it will be created from the seed in main."
           fi
 
       - name: Harvest
@@ -67,11 +75,22 @@ jobs:
       - name: Verify pool invariants before publishing
         run: node scripts/check-pool.mjs
 
-      - name: Push the pool
+      - name: Publish the pool
         run: |
-          cd public/data/pool
-          git init -q
-          git config user.name  "harvest-bot"
+          if [ -d .pool-branch/.git ]; then
+            # Swap in this run's output but KEEP .git, so the commit extends the
+            # existing history and the push is a plain fast-forward.
+            find .pool-branch -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          else
+            # First ever run: start the branch from scratch.
+            rm -rf .pool-branch && mkdir -p .pool-branch
+            git -C .pool-branch init -q -b pool
+            git -C .pool-branch remote add origin \
+              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          fi
+          cp -R public/data/pool/. .pool-branch/
+          cd .pool-branch
+          git config user.name "harvest-bot"
           git config user.email "harvest-bot@users.noreply.github.com"
           git add -A
           # A quota-capped run can legitimately produce no new videos. Committing
@@ -82,10 +101,8 @@ jobs:
             exit 0
           fi
           git commit -q -m "harvest: pool at $(node -e "console.log(require('./manifest.json').total)") videos"
-          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:pool
-        # Force-push is correct here: the pool branch is a published snapshot of
-        # generated data, not a shared development history. Every record it contains
-        # is reproducible from the harvester state.
+          # No --force: this is a fast-forward onto the branch we just cloned.
+          git push -q origin HEAD:pool
 
       # A red Actions run on an unwatched repo is invisible. An issue sends email.
       - name: Raise the alarm
