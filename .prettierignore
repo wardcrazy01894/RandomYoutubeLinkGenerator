@@ -1,0 +1,5 @@
+dist
+node_modules
+package-lock.json
+# Machine-generated sample pool — huge, and formatting it would balloon diffs.
+public/data/pool

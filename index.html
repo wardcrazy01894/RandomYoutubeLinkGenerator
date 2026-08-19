@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Random YouTube</title>
+    <meta
+      name="description"
+      content="A uniform random draw from YouTube's public corpus — not a curated list, not a recommendation."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎲</text></svg>"
+    />
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <h1>Random YouTube</h1>
+        <p class="sub" id="subhead">Loading the pool…</p>
+      </header>
+
+      <div id="banner" class="banner" hidden></div>
+
+      <button id="draw" class="draw" type="button" disabled>
+        Show me a random video
+      </button>
+
+      <section id="result" class="result" hidden>
+        <div class="stage">
+          <div id="thumb" class="thumb">
+            <img id="thumb-img" alt="" />
+            <button id="play" class="play" type="button">
+              <span class="play-icon" aria-hidden="true">▶</span>
+              <span>Play this video</span>
+            </button>
+          </div>
+          <div id="player" class="player" hidden></div>
+        </div>
+
+        <h2 id="title" class="title"></h2>
+        <p class="meta" id="meta"></p>
+
+        <div class="actions">
+          <a
+            id="watch"
+            class="link"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            >Open on YouTube ↗</a
+          >
+          <button id="report" class="link danger" type="button">
+            Report this video
+          </button>
+        </div>
+      </section>
+
+      <footer>
+        <label class="toggle">
+          <input type="checkbox" id="safe" checked />
+          <span>Skip age-restricted videos</span>
+        </label>
+        <p class="fine">
+          <a
+            href="https://github.com/wardcrazy01894/RandomYoutubeLinkGenerator/blob/main/docs/RANDOMNESS.md"
+            >How random is this, really? →</a
+          >
+        </p>
+        <p class="fine muted" id="poolinfo"></p>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

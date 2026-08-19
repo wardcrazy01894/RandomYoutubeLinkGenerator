@@ -1,0 +1,20 @@
+# Gitleaks config.
+#
+# The pool is tens of thousands of random 11-character base64url video IDs, which is
+# exactly the shape gitleaks' entropy and generic-api-key rules fire on. Without this
+# allowlist every PR goes red on false positives and the signal is lost.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "youtube-api-key"
+description = "Google/YouTube Data API key committed to the repo"
+regex = '''AIza[0-9A-Za-z_\-]{35}'''
+keywords = ["AIza"]
+
+[allowlist]
+description = "Generated pool data and lockfile"
+paths = [
+  '''public/data/pool/.*\.json''',
+  '''package-lock\.json''',
+]

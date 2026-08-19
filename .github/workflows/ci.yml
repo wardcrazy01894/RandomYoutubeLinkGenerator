@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least-privilege token. gitleaks-action needs to read PR commits on pull_request
+# events; without this it 403s ("Resource not accessible by integration").
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build:
+    name: build / typecheck / lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies (locked)
+        run: npm ci
+      # Informational only: flag known vulns in shipped deps without ever wedging a PR
+      # on a freshly published advisory.
+      - name: Audit production deps (informational)
+        run: npm audit --omit=dev
+        continue-on-error: true
+      - name: Type check (tsc)
+        run: npm run typecheck
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Format check (prettier)
+        run: npm run format:check
+      - name: Build (vite)
+        run: npm run build
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies (locked)
+        run: npm ci
+      - name: Run tests (vitest)
+        run: npm test
+
+  # Guards the pool's structural invariants. A malformed shard would silently truncate
+  # the draw range, which is a randomness bug rather than a crash — CI has to catch it.
+  pool-integrity:
+    name: pool integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Verify pool invariants
+        run: node scripts/check-pool.mjs
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0 # full history so gitleaks can scan all commits on the branch
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

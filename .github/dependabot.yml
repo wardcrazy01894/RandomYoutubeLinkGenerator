@@ -1,0 +1,31 @@
+# Grouped so routine bumps arrive as ONE pull request on a solo repo, where every PR
+# costs a CI run and a review. Majors fall outside the groups and get their own PR,
+# because those are the ones that need reading.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      npm-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # Workflows pin actions by commit SHA with a version comment — Dependabot updates
+  # both the SHA and the comment, so the pinning survives.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore(ci)
+    groups:
+      github-actions:
+        patterns: ['*']

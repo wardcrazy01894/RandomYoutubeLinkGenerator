@@ -1,0 +1,4 @@
+# The pool is machine-generated. Without this, every harvest PR renders as a
+# multi-thousand-line diff that GitHub's diff view collapses or chokes on.
+public/data/pool/*.json linguist-generated=true -diff
+package-lock.json       linguist-generated=true -diff

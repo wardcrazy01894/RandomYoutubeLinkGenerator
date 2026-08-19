@@ -1,0 +1,112 @@
+name: harvest
+
+# Nightly sampling run. Pushes the grown pool to the unprotected `pool` branch, then
+# publishes. It does NOT open a pull request: a GITHUB_TOKEN-created PR does not fire
+# `pull_request` events, so the required checks on `main` would never report and every
+# nightly PR would be permanently unmergeable. See docs/DESIGN.md §4.3.
+#
+# The nightly push to `pool` also counts as repo activity, which keeps GitHub from
+# auto-disabling this schedule after 60 days.
+
+on:
+  schedule:
+    - cron: '17 8 * * *' # 08:17 UTC — off the hour, since cron is best-effort anyway
+  workflow_dispatch:
+    inputs:
+      units:
+        description: 'Quota units to spend (max 10000/day)'
+        required: false
+        default: '9500'
+
+permissions:
+  contents: write # push to the `pool` branch
+  issues: write # raise the health alarm
+
+# Never let a manual run collide with the cron and fight over the branch.
+concurrency:
+  group: harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      status: ${{ steps.run.outcome }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Restore the live pool from the `pool` branch
+        run: |
+          if git ls-remote --exit-code --heads origin pool >/dev/null 2>&1; then
+            git fetch --depth=1 origin pool
+            rm -rf public/data/pool && mkdir -p public/data/pool
+            git archive origin/pool | tar -x -C public/data/pool
+          else
+            echo "No pool branch yet — seeding from main."
+          fi
+
+      - name: Harvest
+        id: run
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          HARVEST_UNITS: ${{ github.event.inputs.units || '9500' }}
+        run: node scripts/harvest.mjs
+
+      - name: Verify pool invariants before publishing
+        run: node scripts/check-pool.mjs
+
+      - name: Push the pool
+        run: |
+          cd public/data/pool
+          git init -q
+          git config user.name  "harvest-bot"
+          git config user.email "harvest-bot@users.noreply.github.com"
+          git add -A
+          git commit -q -m "harvest: pool at $(node -e "console.log(require('./manifest.json').total)") videos"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:pool
+        # Force-push is correct here: the pool branch is a published snapshot of
+        # generated data, not a shared development history. Every record it contains
+        # is reproducible from the harvester state.
+
+      # A red Actions run on an unwatched repo is invisible. An issue sends email.
+      - name: Raise the alarm
+        if: failure()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const title = 'Harvester health: run failed'
+            const body = [
+              `The nightly harvest failed.`,
+              ``,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ``,
+              `Triage: docs/OPERATIONS.md — the usual causes are a broken canary`,
+              `(YouTube changed ID tokenization), an invalid/restricted API key, or`,
+              `a collapsed yield.`,
+            ].join('\n')
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'harvester-health',
+            })
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['harvester-health'],
+              })
+            }
+
+  publish:
+    needs: harvest
+    if: success()
+    uses: ./.github/workflows/deploy-pages.yml
