@@ -17,6 +17,21 @@ updates:
       npm-minor-and-patch:
         patterns: ['*']
         update-types: [minor, patch]
+    # Majors that the rest of the toolchain cannot accept yet. Both were proposed,
+    # tested, and found to break the build — re-proposing them every week is noise.
+    # Re-check both when typescript-eslint ships support; they will likely land together.
+    ignore:
+      # typescript-eslint hard-errors on load under TS 7.0 ("does not support TS 7.0"),
+      # which takes out `npm run lint` entirely. tsc itself was fine — typecheck, tests
+      # and build all passed on 7.0.2. Tracking:
+      # https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # @eslint/js 10 requires eslint ^10 as a peer, but we are on eslint 9 and
+      # typescript-eslint 8 does not support eslint 10. eslint, @eslint/js and
+      # typescript-eslint have to move as one, not one package at a time.
+      - dependency-name: '@eslint/js'
+        update-types: ['version-update:semver-major']
 
   # Workflows pin actions by commit SHA with a version comment — Dependabot updates
   # both the SHA and the comment, so the pinning survives.
