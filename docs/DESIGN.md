@@ -365,11 +365,27 @@ identifies "home video of somebody's kids", and we do not pretend otherwise.
 
 ### 5.3 Quarantine window
 
-Harvest, hold 7 days, re-validate, then serve. Videos YouTube removes in that window never
-reach a viewer. Revision 1 framed this sweep as staleness hygiene; it is actually the
-primary safety mechanism. NOTE: nothing currently schedules it — it is a manual
-`npm run revalidate` (see docs/OPERATIONS.md). Automating it is the outstanding
-follow-up, and until then the cadence is whatever an operator actually does.
+Videos uploaded in the last 30 days are held back at harvest time, so YouTube's own
+moderation has a window to act before anything reaches a viewer.
+
+Beyond that, `scripts/revalidate.mjs` runs nightly as a step in `harvest.yml` and
+re-checks a **slice** of the pool, advancing a `sweepCursor` in `state.json` and wrapping
+at the end. It tombstones only permanent states — deleted, or made private. Toggle-governed
+filters (age-restriction, embeddability) are deliberately never tombstoned: the viewer can
+lift those, so a tombstone would convert a filter into a removal they cannot undo.
+
+**Why a slice.** A full sweep costs 1 unit per 50 videos, so it grows without bound — 20%
+of a day's entire quota at 100k videos, more than a whole day past ~500k. The cursor makes
+the cost constant and the coverage _period_ the thing that grows, which is an explicit dial
+rather than a cliff. At the default 500 units (25,000 records) a pool under ~25k is fully
+re-checked every night; 100k is covered every ~4 nights.
+
+**What it is not.** Revision 2 called this the primary safety mechanism. It isn't: a
+deleted video cannot play, because YouTube enforces removal at playback, and the client's
+`onError` already hides it and auto-advances. The sweep's real value is removing dead
+entries pool-wide rather than per-viewer, and keeping the served count honest. The
+mechanisms that actually protect a viewer are the ones acting _before_ playback — no
+autoplay, the age-restriction filter, the 30-day upload quarantine, and the blocklist.
 
 ### 5.4 Report path, blocklist, kill switch
 

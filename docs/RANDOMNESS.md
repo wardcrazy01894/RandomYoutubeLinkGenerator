@@ -75,7 +75,7 @@ Ordered by how much they should worry you.
    everything. We monitor the character distribution by upload year to detect it.
 4. **Embeddability.** By default we serve only embeddable videos, which excludes most
    major-label music and many news organisations. The footer toggle lifts this along with
-   age-restriction, so it is a default rather than a hard frame boundary — and the weekly
+   age-restriction, so it is a default rather than a hard frame boundary — and the
    sweep deliberately does not tombstone non-embeddable videos, which would turn that
    default into a permanent removal. Currently ~99% of harvested videos qualify, so the
    effect is small but real.
@@ -91,7 +91,7 @@ Ordered by how much they should worry you.
 7. **Safety filtering (on by default).** The default view hides age-restricted and
    non-embeddable videos; the footer toggle turns both off. Three exclusions are **not**
    covered by the toggle and
-   always apply: the maintainer's `blocklist.json`, videos the weekly sweep found deleted
+   always apply: the maintainer's `blocklist.json`, videos the re-validation sweep found deleted
    or made private (`tombstones.json`), and videos you have hidden yourself in this
    browser. So the toggle widens the frame, it does not make it unfiltered.
 8. **Harvester locale.** Results are region- and language-conditioned; we pin `US`/`en`

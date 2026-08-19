@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       units:
-        description: 'Quota units to spend (max 10000/day)'
+        description: 'Quota units to spend on harvesting (sweep uses ~500 more)'
         required: false
-        default: '9500'
+        default: '9000'
       baseline_reset:
         description: 'Relearn the yield baseline from this run (accepts a permanently changed yield)'
         type: boolean
@@ -101,12 +101,23 @@ jobs:
         id: run
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          HARVEST_UNITS: ${{ github.event.inputs.units || '9500' }}
+          HARVEST_UNITS: ${{ github.event.inputs.units || '9000' }}
           # Only ever '1' or unset. Documented recovery was "clear baselineYield on the
           # pool branch by hand", which bypasses the relearn guard and can leave the gate
           # disarmed with no warning; this path keeps that guard.
           HARVEST_BASELINE_RESET: ${{ inputs.baseline_reset && '1' || '' }}
         run: node scripts/harvest.mjs
+
+      # Incremental re-validation, sharing the same pool checkout and the same publish
+      # step. Nightly rather than weekly because the cursor makes each run a fixed cost:
+      # 500 units covers 25,000 records, so a 100k pool is fully re-checked every ~4
+      # nights. Non-fatal — a sweep failure must not discard a good harvest.
+      - name: Re-validate a slice of the pool
+        continue-on-error: true
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          REVALIDATE_UNITS: '500'
+        run: node scripts/revalidate.mjs
 
       - name: Verify pool invariants before publishing
         run: node scripts/check-pool.mjs
