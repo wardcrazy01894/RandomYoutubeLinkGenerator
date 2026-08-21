@@ -104,10 +104,11 @@ function render(record: PoolRecord): void {
   els.title.textContent = record.t || '(no title)'
   els.watch.href = `https://www.youtube.com/watch?v=${record.id}`
 
+  const duration = formatDuration(record.dur)
   const facts: Array<{ text: string; flag?: boolean }> = [
     record.pub ? { text: new Date(record.pub).getFullYear().toString() } : null,
     { text: `${nf.format(record.v)} view${record.v === 1 ? '' : 's'}` },
-    formatDuration(record.dur) ? { text: formatDuration(record.dur) } : null,
+    duration ? { text: duration } : null,
     record.age ? { text: 'age-restricted', flag: true } : null,
   ].filter((f): f is { text: string; flag?: boolean } => f !== null)
 

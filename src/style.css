@@ -13,8 +13,17 @@
   --line: rgba(20, 20, 30, 0.1);
   --line-strong: rgba(20, 20, 30, 0.16);
   --accent: #db2323;
-  --accent-2: #ff5b3d;
+  /* 3.18:1 on --bg. The h1 wordmark is large text, so 3.0 is the bar, and the
+     more saturated #ff5b3d measured 2.98 — under it. */
+  --accent-2: #fb5334;
   --accent-ring: rgba(219, 35, 35, 0.4);
+  /* The button's own gradient, deliberately NOT --accent/--accent-2 and
+     deliberately identical in both themes: it is the only place white text sits
+     on the sweep, and the decorative endpoints are too light to carry it.
+     White on #db2323 is 4.91:1 and on #d83d17 is 4.57:1, so every point along
+     the ramp clears WCAG AA. Re-tint these only against that measurement. */
+  --btn-a: #db2323;
+  --btn-b: #d83d17;
   --chip: rgba(20, 20, 30, 0.05);
   --warn-bg: rgba(255, 176, 32, 0.14);
   --warn-fg: #7a4a00;
@@ -153,7 +162,7 @@ h1 .grad {
   font-weight: 650;
   letter-spacing: -0.01em;
   color: #fff;
-  background: linear-gradient(100deg, var(--accent), var(--accent-2));
+  background: linear-gradient(100deg, var(--btn-a), var(--btn-b));
   border: 0;
   border-radius: var(--radius);
   cursor: pointer;
@@ -221,7 +230,7 @@ h1 .grad {
   animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 .banner::before {
-  content: '!';
+  content: '!' / '';
   flex: none;
   width: 1.15rem;
   height: 1.15rem;
@@ -461,8 +470,11 @@ footer {
   translate: 0 -50%;
   transition: translate 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
+.toggle input:focus-visible {
+  border-radius: 999px;
+}
 .toggle input:checked {
-  background: linear-gradient(100deg, var(--accent), var(--accent-2));
+  background: linear-gradient(100deg, var(--btn-a), var(--btn-b));
   border-color: transparent;
 }
 .toggle input:checked::after {
