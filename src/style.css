@@ -1,93 +1,267 @@
+/* ---------------------------------------------------------------------------
+   Palette. Light is the base; the dark block only re-points the same tokens, so
+   every colour has exactly one definition per theme.
+--------------------------------------------------------------------------- */
 :root {
-  --bg: #f7f7f8;
-  --fg: #16161a;
-  --muted: #6b6b76;
-  --card: #ffffff;
-  --line: #e3e3e8;
-  --accent: #cc0000;
-  --warn-bg: #fff4e5;
+  --bg: #fbfbfd;
+  --bg-tint-a: rgba(224, 36, 36, 0.13);
+  --bg-tint-b: rgba(88, 86, 214, 0.12);
+  --fg: #14141a;
+  --muted: #63636f;
+  --card: rgba(255, 255, 255, 0.72);
+  --card-solid: #ffffff;
+  --line: rgba(20, 20, 30, 0.1);
+  --line-strong: rgba(20, 20, 30, 0.16);
+  --accent: #db2323;
+  /* 3.18:1 on --bg. The h1 wordmark is large text, so 3.0 is the bar, and the
+     more saturated #ff5b3d measured 2.98 — under it. */
+  --accent-2: #fb5334;
+  --accent-ring: rgba(219, 35, 35, 0.4);
+  /* The button's own gradient, deliberately NOT --accent/--accent-2 and
+     deliberately identical in both themes: it is the only place white text sits
+     on the sweep, and the decorative endpoints are too light to carry it.
+     White on #db2323 is 4.91:1 and on #d83d17 is 4.57:1, so every point along
+     the ramp clears WCAG AA. Re-tint these only against that measurement. */
+  --btn-a: #db2323;
+  --btn-b: #d83d17;
+  --chip: rgba(20, 20, 30, 0.05);
+  --warn-bg: rgba(255, 176, 32, 0.14);
   --warn-fg: #7a4a00;
-  --radius: 14px;
+  --warn-line: rgba(255, 176, 32, 0.4);
+  --shadow-sm: 0 1px 2px rgba(16, 16, 26, 0.06);
+  --shadow-md:
+    0 4px 12px rgba(16, 16, 26, 0.07), 0 12px 32px rgba(16, 16, 26, 0.06);
+  --shadow-lg:
+    0 8px 24px rgba(16, 16, 26, 0.09), 0 32px 64px rgba(16, 16, 26, 0.1);
+  --radius: 18px;
+  --radius-sm: 12px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111114;
-    --fg: #ececf1;
-    --muted: #9a9aa6;
-    --card: #1b1b20;
-    --line: #2c2c34;
-    --warn-bg: #3a2a10;
-    --warn-fg: #f0c98a;
+    --bg: #08080b;
+    --bg-tint-a: rgba(255, 60, 40, 0.16);
+    --bg-tint-b: rgba(110, 100, 255, 0.14);
+    --fg: #f1f1f6;
+    --muted: #9a9aa8;
+    --card: rgba(255, 255, 255, 0.045);
+    --card-solid: #131318;
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --accent: #f03535;
+    --accent-2: #ff6a45;
+    --accent-ring: rgba(255, 90, 60, 0.45);
+    --chip: rgba(255, 255, 255, 0.06);
+    --warn-bg: rgba(255, 176, 32, 0.1);
+    --warn-fg: #f3ce93;
+    --warn-line: rgba(255, 176, 32, 0.24);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md:
+      0 4px 12px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5), 0 32px 64px rgba(0, 0, 0, 0.45);
   }
 }
+
 * {
   box-sizing: border-box;
 }
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
 body {
   margin: 0;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--fg);
   font:
-    16px/1.55 -apple-system,
+    16px/1.6 ui-sans-serif,
+    -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
+    Inter,
     Roboto,
     Helvetica,
     Arial,
     sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+  -webkit-font-smoothing: antialiased;
 }
+
+/* Ambient wash behind everything. Fixed and inert so it never affects layout or
+   intercepts a click. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 15% -10%, var(--bg-tint-a), transparent 60%),
+    radial-gradient(50rem 36rem at 95% 0%, var(--bg-tint-b), transparent 62%);
+}
+
 .wrap {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 2.5rem 1.25rem 4rem;
+  padding: clamp(2.5rem, 8vh, 5rem) 1.25rem 5rem;
+}
+
+/* --- hero ---------------------------------------------------------------- */
+.hero {
+  text-align: center;
+  margin-bottom: 2.25rem;
+}
+.mark {
+  font-size: 1.85rem;
+  line-height: 1;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: 0 auto 1.1rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--card-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-md);
 }
 h1 {
-  font-size: 1.9rem;
-  margin: 0 0 0.25rem;
-  letter-spacing: -0.02em;
+  font-size: clamp(2rem, 6vw, 2.75rem);
+  line-height: 1.1;
+  margin: 0 0 0.55rem;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+}
+h1 .grad {
+  background: linear-gradient(100deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .sub {
   color: var(--muted);
-  margin: 0 0 1.75rem;
+  margin: 0;
+  font-size: 1.02rem;
+  max-width: 34rem;
+  margin-inline: auto;
+  text-wrap: balance;
 }
 
+/* --- primary action ------------------------------------------------------ */
 .draw {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: block;
   width: 100%;
-  padding: 1.1rem 1.25rem;
-  font-size: 1.1rem;
-  font-weight: 600;
+  padding: 1.15rem 1.25rem;
+  font: inherit;
+  font-size: 1.08rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: #fff;
-  background: var(--accent);
+  background: linear-gradient(100deg, var(--btn-a), var(--btn-b));
   border: 0;
   border-radius: var(--radius);
   cursor: pointer;
+  box-shadow:
+    var(--shadow-md),
+    0 10px 30px -12px var(--accent-ring);
   transition:
-    transform 0.06s ease,
-    opacity 0.15s ease;
+    transform 0.14s cubic-bezier(0.2, 0.8, 0.3, 1),
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+/* Sheen sweep on hover. Decorative only. */
+.draw::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.28) 45%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
 }
 .draw:hover:not(:disabled) {
-  opacity: 0.92;
+  transform: translateY(-2px);
+  filter: saturate(1.08);
+  box-shadow:
+    var(--shadow-lg),
+    0 16px 40px -14px var(--accent-ring);
+}
+.draw:hover:not(:disabled)::after {
+  transform: translateX(100%);
 }
 .draw:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 .draw:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: default;
+  box-shadow: none;
 }
 
+:where(button, a, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- banner -------------------------------------------------------------- */
 .banner {
-  padding: 0.7rem 0.9rem;
-  border-radius: 10px;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius-sm);
   background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
   color: var(--warn-fg);
   font-size: 0.9rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.1rem;
+  animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.banner::before {
+  content: '!' / '';
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
+/* --- result -------------------------------------------------------------- */
 .result {
-  margin-top: 1.75rem;
+  margin-top: 2rem;
+  padding: 0.75rem 0.75rem 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 6px);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+  animation: rise 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
 .stage {
   position: relative;
   background: #000;
@@ -100,12 +274,24 @@ h1 {
   position: absolute;
   inset: 0;
 }
+/* Held back deliberately: the thumbnail is obscured until the viewer chooses to
+   play, so an unvetted random draw cannot put an image on screen unasked. */
 .thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: blur(18px) brightness(0.65);
-  transform: scale(1.1);
+  filter: blur(22px) brightness(0.55) saturate(1.3);
+  transform: scale(1.15);
+}
+.thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    75% 75% at 50% 45%,
+    transparent,
+    rgba(0, 0, 0, 0.45)
+  );
 }
 .player iframe {
   width: 100%;
@@ -117,81 +303,230 @@ h1 {
   position: absolute;
   inset: 0;
   margin: auto;
+  z-index: 1;
   width: fit-content;
   height: fit-content;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.8rem 1.3rem;
-  font-size: 1rem;
+  gap: 0.6rem;
+  padding: 0.85rem 1.4rem;
+  font: inherit;
+  font-size: 0.98rem;
   font-weight: 600;
   color: #fff;
-  background: rgba(0, 0, 0, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(12, 12, 16, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 999px;
   cursor: pointer;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  transition:
+    transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1),
+    background 0.2s ease,
+    border-color 0.2s ease;
 }
 .play:hover {
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(12, 12, 16, 0.78);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.04);
+}
+.play:active {
+  transform: scale(0.98);
 }
 .play-icon {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+  translate: 1px 0;
 }
 
 .title {
-  font-size: 1.15rem;
-  margin: 1rem 0 0.3rem;
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+  margin: 1.1rem 0.35rem 0.6rem;
   overflow-wrap: anywhere;
 }
+
+/* Facts about the draw, one chip each. Written by render() in main.ts. */
 .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0.35rem 1.1rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--chip);
+  border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 0.88rem;
-  margin: 0 0 0.9rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chip-flag {
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+  color: var(--warn-fg);
 }
 
 .actions {
   display: flex;
-  gap: 1.25rem;
+  gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+  margin: 0 0.35rem;
 }
 .link {
-  background: none;
-  border: 0;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--line);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 550;
   color: var(--muted);
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 .link:hover {
   color: var(--fg);
+  border-color: var(--line-strong);
+  background: var(--chip);
 }
 .danger:hover {
   color: var(--accent);
+  border-color: var(--accent-ring);
+  background: transparent;
 }
 
+/* --- footer -------------------------------------------------------------- */
 footer {
   margin-top: 3rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--line);
 }
 .toggle {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
   font-size: 0.92rem;
   cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease;
 }
+.toggle:hover {
+  border-color: var(--line-strong);
+}
+
+.fineprint {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  padding: 0 0.35rem;
+}
+/* Native checkbox restyled as a switch — same element, same events. */
+.toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  margin: 0;
+  position: relative;
+  width: 2.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: var(--chip);
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+.toggle input::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0.16rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--card-solid);
+  box-shadow: var(--shadow-sm);
+  translate: 0 -50%;
+  transition: translate 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.toggle input:focus-visible {
+  border-radius: 999px;
+}
+.toggle input:checked {
+  background: linear-gradient(100deg, var(--btn-a), var(--btn-b));
+  border-color: transparent;
+}
+.toggle input:checked::after {
+  translate: 0.95rem -50%;
+  background: #fff;
+}
+
 .fine {
-  font-size: 0.85rem;
-  margin: 0.85rem 0 0;
+  font-size: 0.84rem;
+  margin: 0;
+}
+.fine:empty {
+  display: none;
 }
 .fine a {
   color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 1px;
+  transition: color 0.15s ease;
+}
+.fine a:hover {
+  color: var(--fg);
 }
 .muted {
   color: var(--muted);
+}
+
+@media (max-width: 480px) {
+  .result {
+    padding: 0.5rem 0.5rem 0.9rem;
+    border-radius: var(--radius);
+  }
+  .stage {
+    border-radius: var(--radius-sm);
+  }
+  .fineprint {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  .actions .link {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

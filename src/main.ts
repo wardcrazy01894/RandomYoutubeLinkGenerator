@@ -104,13 +104,24 @@ function render(record: PoolRecord): void {
   els.title.textContent = record.t || '(no title)'
   els.watch.href = `https://www.youtube.com/watch?v=${record.id}`
 
-  const bits = [
-    record.pub ? new Date(record.pub).getFullYear().toString() : null,
-    `${nf.format(record.v)} view${record.v === 1 ? '' : 's'}`,
-    formatDuration(record.dur),
-    record.age ? 'age-restricted' : null,
-  ].filter(Boolean)
-  els.meta.textContent = bits.join(' · ')
+  const duration = formatDuration(record.dur)
+  const facts: Array<{ text: string; flag?: boolean }> = [
+    record.pub ? { text: new Date(record.pub).getFullYear().toString() } : null,
+    { text: `${nf.format(record.v)} view${record.v === 1 ? '' : 's'}` },
+    duration ? { text: duration } : null,
+    record.age ? { text: 'age-restricted', flag: true } : null,
+  ].filter((f): f is { text: string; flag?: boolean } => f !== null)
+
+  // Built as elements rather than one joined string so each fact can carry its own
+  // styling. Text goes in via textContent — titles and metadata are untrusted.
+  els.meta.replaceChildren(
+    ...facts.map((f) => {
+      const chip = document.createElement('span')
+      chip.className = f.flag ? 'chip chip-flag' : 'chip'
+      chip.textContent = f.text
+      return chip
+    }),
+  )
 }
 
 async function draw(): Promise<void> {
