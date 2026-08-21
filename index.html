@@ -8,6 +8,17 @@
       name="description"
       content="A uniform random draw from YouTube's public corpus — not a curated list, not a recommendation."
     />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="theme-color"
+      content="#fbfbfd"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#08080b"
+      media="(prefers-color-scheme: dark)"
+    />
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎲</text></svg>"
@@ -15,8 +26,9 @@
   </head>
   <body>
     <main class="wrap">
-      <header>
-        <h1>Random YouTube</h1>
+      <header class="hero">
+        <div class="mark" aria-hidden="true">🎲</div>
+        <h1>Random <span class="grad">YouTube</span></h1>
         <p class="sub" id="subhead">Loading the pool…</p>
       </header>
 
@@ -61,13 +73,15 @@
           <input type="checkbox" id="safe" checked />
           <span>Skip age-restricted and non-embeddable videos</span>
         </label>
-        <p class="fine">
-          <a
-            href="https://github.com/wardcrazy01894/RandomYoutubeLinkGenerator/blob/main/docs/RANDOMNESS.md"
-            >How random is this, really? →</a
-          >
-        </p>
-        <p class="fine muted" id="poolinfo"></p>
+        <div class="fineprint">
+          <p class="fine">
+            <a
+              href="https://github.com/wardcrazy01894/RandomYoutubeLinkGenerator/blob/main/docs/RANDOMNESS.md"
+              >How random is this, really? →</a
+            >
+          </p>
+          <p class="fine muted" id="poolinfo"></p>
+        </div>
       </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
