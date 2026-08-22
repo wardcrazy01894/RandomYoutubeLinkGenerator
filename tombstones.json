@@ -1,0 +1,5 @@
+{
+  "ids": [],
+  "note": "Video IDs the re-validation sweep found deleted or made private. Only permanent states are recorded here: embeddability and age-restriction are governed by the safe-mode toggle, so tombstoning them would convert a filter the viewer can lift into a removal they cannot. Shards are immutable, so removals live here rather than being edited out.",
+  "updatedAt": "2026-08-22T08:47:38.155Z"
+}
