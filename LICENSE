@@ -1,0 +1,17 @@
+Pool data — terms of use
+
+This directory contains machine-generated sampling output: YouTube video IDs, titles,
+and coarse public metadata (view count, duration, upload date, embeddability and
+age-restriction flags).
+
+- These are statements of fact about publicly listed videos, gathered through the
+  official YouTube Data API. They are provided AS-IS, with no warranty of accuracy,
+  completeness, or continued availability.
+- Channel and uploader names are deliberately NOT collected or stored.
+- No video content is copied, hosted, or redistributed here. Playback happens on
+  YouTube's own embedded player.
+- Removal requests: open an issue or use the contact address on the site, and the ID
+  will be added to blocklist.json and dropped from the served pool.
+- Inclusion here implies no endorsement of, or affiliation with, any video or channel.
+
+Not affiliated with, endorsed by, or sponsored by YouTube or Google.
