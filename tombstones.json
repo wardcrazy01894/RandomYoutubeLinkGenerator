@@ -29,8 +29,9 @@
     "txxk3-KooRk",
     "x9fn5-xD8tg",
     "zvITx-VWZqQ",
-    "OFIpx-h19gU"
+    "OFIpx-h19gU",
+    "SsuuV-D51FU"
   ],
   "note": "Video IDs the re-validation sweep found deleted or made private. Only permanent states are recorded here: embeddability and age-restriction are governed by the safe-mode toggle, so tombstoning them would convert a filter the viewer can lift into a removal they cannot. Shards are immutable, so removals live here rather than being edited out.",
-  "updatedAt": "2026-09-22T13:25:43.461Z"
+  "updatedAt": "2026-09-23T13:39:14.894Z"
 }
