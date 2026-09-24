@@ -268,7 +268,26 @@ jobs:
           fi
           git commit -q -m "harvest: pool at ${NEW} videos"
           # No --force: this is a fast-forward onto the branch we just cloned.
-          git push -q origin HEAD:pool
+          #
+          # Retried: GitHub occasionally answers a push with a 5xx ("remote rejected
+          # HEAD -> pool (Internal Server Error)"). One such blip, unretried, threw
+          # away a whole night's harvest AFTER the quota was spent. The push is
+          # idempotent — if the server applied it and then failed to say so, the
+          # retry reports "Everything up-to-date" — so repeating it is safe. A real
+          # non-fast-forward rejection fails every attempt and still fails the run.
+          # Delays are 10/40/90/160 s (~5 min total), well inside the job timeout.
+          for attempt in 1 2 3 4 5; do
+            if git push -q origin HEAD:pool; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "push to pool failed after $attempt attempts — giving up"
+              exit 1
+            fi
+            delay=$((attempt * attempt * 10))
+            echo "push to pool failed (attempt $attempt/5); retrying in ${delay}s"
+            sleep "$delay"
+          done
         env:
           GH_PAT: ${{ secrets.GITHUB_TOKEN }}
 
@@ -287,7 +306,9 @@ jobs:
               `Triage: docs/OPERATIONS.md — the usual causes are a broken canary`,
               `(YouTube changed ID tokenization), a frozen sampling frontier`,
               `(no-fresh-progress), an invalid/restricted API key, a collapsed yield,`,
-              `or a dispatched \`units\` below 500 (too small to start a single bucket).`,
+              `a dispatched \`units\` below 500 (too small to start a single bucket),`,
+              `or a GitHub 5xx on the final push to \`pool\` (the harvest itself succeeded`,
+              `and nothing is corrupted; the next scheduled run redraws the same prefixes).`,
             ].join('\n')
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,

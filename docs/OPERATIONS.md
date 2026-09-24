@@ -186,6 +186,21 @@ The per-minute limit, distinct from the daily quota. The client already backs of
 exponentially and paces requests at 350 ms. Occasional lines are fine; if most buckets fail
 this way, raise `PACING_MS` in `scripts/harvest.mjs`.
 
+### `! [remote rejected] HEAD -> pool (Internal Server Error)` in the Publish step
+
+GitHub, not YouTube. The harvest itself completed — look for `pool now N videos` and
+`Pool OK` earlier in the log — and only the final push was refused by a GitHub 5xx. The
+`pool` branch is untouched and nothing is corrupted, but the night's records never left
+the runner, so that day's quota bought nothing. Publish retries the push five times with
+backoff (about five minutes in all), so a single blip no longer fails the run. If all five
+fail with `Internal Server Error`, check <https://www.githubstatus.com>. Any other message
+after five attempts — a non-fast-forward, an auth error — is not a GitHub outage: something
+else touched the `pool` branch or the token. Look at the branch itself before re-running.
+
+Do not re-dispatch the same day: the quota is already spent, and the next scheduled run
+redoes exactly the same work anyway. `state.json` was never pushed, so the Feistel counter
+and the sweep cursor are where they were, and the same prefixes are drawn again.
+
 ## The site says "pool hasn't been updated in N days"
 
 The site self-monitors — it reads `manifest.generatedAt` and warns past 3 days. If you see
