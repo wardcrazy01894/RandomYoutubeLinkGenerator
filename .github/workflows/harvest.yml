@@ -195,11 +195,11 @@ jobs:
         with:
           script: |
             const body = [
-              `Re-validation **refused** this window's findings: it would have removed more`,
-              `of the window than the mass-removal guard allows, which is far more likely to`,
-              `be a bad API response than reality.`,
+              `Re-validation **refused** some or all of this window's findings: a batch, or`,
+              `the whole window, would have lost more than the mass-removal guard allows,`,
+              `which is far more likely to be a bad API response than reality.`,
               ``,
-              `Nothing was tombstoned for that window, and the cursor still advanced — the`,
+              `Nothing was tombstoned for the refused part, and the cursor still advanced — the`,
               `sweep is NOT wedged, and the window is re-examined on the next full pass.`,
               `One of these is routine. Several nights running is not: check whether`,
               `videos.list is returning empty items for valid ids.`,
