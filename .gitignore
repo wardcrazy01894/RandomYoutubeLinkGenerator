@@ -9,3 +9,6 @@ dist
 
 # Working copy of the `pool` branch, created by the harvest workflow
 .pool-branch
+
+# local test reporter output
+.vitest/

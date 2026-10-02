@@ -394,6 +394,14 @@ at the end. It tombstones only permanent states — deleted, or made private. To
 filters (age-restriction, embeddability) are deliberately never tombstoned: the viewer can
 lift those, so a tombstone would convert a filter into a removal they cannot undo.
 
+"Deleted" is never read off a single response. `videos.list` can return HTTP 200 with most
+of a batch's ids silently absent (it did so for 22 batches on 2026-10-01). So a batch
+missing more than the mass-removal ratio is refused outright, a smaller miss is re-queried
+in a second call, and an id counts as gone only when both calls agree and the second
+returned nothing the first omitted. A tombstone is permanent, so the
+sweep errs toward leaving a dead video for the player's `onError` to hide rather than
+removing a live one for everyone. docs/OPERATIONS.md has the operator view.
+
 **Why a slice.** A full sweep costs 1 unit per 50 videos, so it grows without bound — 20%
 of a day's entire quota at 100k videos, more than a whole day past ~500k. The cursor makes
 the cost constant and the coverage _period_ the thing that grows, which is an explicit dial

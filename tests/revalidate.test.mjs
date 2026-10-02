@@ -34,17 +34,32 @@ const priv = new Set((process.env.STUB_PRIVATE ?? '').split(',').filter(Boolean)
 const age = new Set((process.env.STUB_AGE ?? '').split(',').filter(Boolean))
 const noembed = new Set((process.env.STUB_NOEMBED ?? '').split(',').filter(Boolean))
 const quotaAfter = Number(process.env.STUB_QUOTA_AFTER ?? 0)
+// STUB_TRUNCATE lists 0-based call indices whose response is cut short: HTTP 200, no
+// error, the rest silently absent — what videos.list did on 2026-10-01. "0" keeps the
+// first two items of call 0; "0:45" keeps the first 45.
+const truncate = new Map(
+  (process.env.STUB_TRUNCATE ?? '')
+    .split(',')
+    .filter(Boolean)
+    .map((spec) => {
+      const [call, keep] = spec.split(':')
+      return [Number(call), keep === undefined ? 2 : Number(keep)]
+    }),
+)
 let seen = 0
+let calls = 0
 export async function videosMeta(key, ids) {
   if (quotaAfter && seen >= quotaAfter) throw new QuotaExceeded('stub quota')
   seen += ids.length
+  const call = calls++
   // Absent from the response == deleted, which is what the real API does.
-  return ids.filter((i) => !dead.has(i)).map((i) => ({
+  const items = ids.filter((i) => !dead.has(i)).map((i) => ({
     id: i,
     privacyStatus: priv.has(i) ? 'private' : 'public',
     embeddable: !noembed.has(i),
     ageRestricted: age.has(i),
   }))
+  return truncate.has(call) ? items.slice(0, truncate.get(call)) : items
 }
 `
 
@@ -257,6 +272,104 @@ describe('mass-removal guard', () => {
     const r = run({ STUB_DEAD: dead.join(','), ALLOW_MASS_REMOVAL: '1' })
     expect(r.code, r.out).toBe(0)
     expect(tombs()).toHaveLength(80)
+  })
+})
+
+// 2026-10-01: 22 of 219 videos.list batches returned HTTP 200 with 1-4 of 50 items and
+// 1,062 live videos were tombstoned — 9.7% of the pool, under the whole-run guard. The
+// stub's call order is: batch 0, its confirmation (only if a small number was missing),
+// batch 1, ...
+describe('truncated API responses', () => {
+  const manifest = () =>
+    JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+
+  it('refuses a batch whose first response lost most of it, without a second call', () => {
+    seed(100)
+    const r = run({ STUB_TRUNCATE: '0' })
+    expect(r.code, 'a refused batch must not fail the run').toBe(0)
+    expect(r.out).toMatch(/REFUSING/)
+    expect(tombs()).toEqual([])
+    expect(manifest().stats.lastSweep.refusedBatches).toBe(1)
+    expect(manifest().stats.lastSweep.truncatedBatches).toBe(0)
+    expect(manifest().stats.lastSweep.refused, 'must not be silent').toBe(true)
+    expect(state().sweepCursor, 'the cursor must still advance').toBe(0) // wrapped
+    expect(state().sweeps).toBe(1)
+  })
+
+  it('confirms a small miss with a second call instead of trusting one response', () => {
+    seed(100)
+    const r = run({ STUB_TRUNCATE: '0:45' }) // 5 missing: under the ratio, so confirmed
+    expect(r.code, r.out).toBe(0)
+    expect(
+      tombs(),
+      'ids the second call returned must not be tombstoned',
+    ).toEqual([])
+    expect(manifest().stats.lastSweep.truncatedBatches).toBe(1)
+    expect(manifest().stats.lastSweep.refusedBatches).toBe(0)
+    expect(manifest().stats.lastSweep.refused).toBe(false)
+  })
+
+  // The leak the first version had: a confirmation call that is itself partly truncated
+  // leaves a remainder under the ratio, which was then tombstoned.
+  it('does not trust the remainder when the confirmation call revived anything', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0:45,1:3' }) // 5 missing, the second call returns only 3
+    expect(tombs()).toEqual([])
+    expect(manifest().stats.lastSweep.truncatedBatches).toBe(1)
+  })
+
+  it('defers a genuine deletion in a batch the API flaked on to the next pass', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0:45', STUB_DEAD: id(7) })
+    expect(
+      tombs(),
+      'a dead video can wait a night; a live one cannot come back',
+    ).toEqual([])
+  })
+
+  it('tombstones a genuine deletion both responses agree on', () => {
+    seed(100)
+    run({ STUB_DEAD: id(7) })
+    expect(tombs()).toEqual([id(7)])
+    expect(manifest().stats.lastSweep.truncatedBatches).toBe(0)
+  })
+
+  it('does not let a refused batch block findings elsewhere in the window', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0', STUB_DEAD: id(60) }) // batch 1 is calls 1 and 2
+    expect(tombs()).toEqual([id(60)])
+  })
+
+  it('lets the deliberate override through at batch level too', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0,1', ALLOW_MASS_REMOVAL: '1' })
+    // Under the override the batch is confirmed rather than refused, and the remainder
+    // is trusted: each truncated call keeps two items, so 46 of 50 are written.
+    expect(tombs()).toHaveLength(46)
+  })
+})
+
+// The batch guard sits in front of the whole-run guard and catches most mass-`gone`
+// windows first, so these reach the whole-run guard through private videos, which the
+// API returns as items and the batch guard therefore ignores.
+describe('whole-run guard behind the batch guard', () => {
+  it('still refuses a window where most of what was checked went private', () => {
+    seed(200)
+    const r = run({
+      STUB_PRIVATE: Array.from({ length: 80 }, (_, i) => id(i)).join(','),
+    })
+    expect(r.out).toMatch(/REFUSING to tombstone 80 of 200/)
+    expect(tombs()).toEqual([])
+    const m = JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+    expect(m.stats.lastSweep.refused).toBe(true)
+    expect(m.stats.lastSweep.refusedBatches).toBe(0)
+  })
+
+  it('still refuses a window in which nothing survived, below the floor', () => {
+    seed(2)
+    const r = run({ STUB_PRIVATE: [id(0), id(1)].join(',') })
+    expect(r.out).toMatch(/REFUSING/)
+    expect(tombs()).toEqual([])
   })
 })
 
