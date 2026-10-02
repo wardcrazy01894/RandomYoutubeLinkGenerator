@@ -106,43 +106,6 @@ console.log(
     `of ${manifest.total} (${all.length} to check, ${window.length - all.length} already excluded)`,
 )
 
-const dead = []
-let checked = 0
-try {
-  for (let i = 0; i < all.length; i += 50) {
-    const batch = all.slice(i, i + 50)
-    const meta = await videosMeta(
-      key,
-      batch.map((r) => r.id),
-    )
-    const seen = new Map(meta.map((m) => [m.id, m]))
-    for (const r of batch) {
-      const m = seen.get(r.id)
-      // ONLY permanent states are tombstoned, because a tombstone is a deletion: the
-      // client applies `excluded` before the safeMode check, so anything in here is gone
-      // for every viewer regardless of their toggle.
-      //
-      // Embeddability and age-restriction are deliberately NOT tombstoned. Both are
-      // toggle-GOVERNED filters — docs/DESIGN.md §5.2 promises the opt-out lifts both —
-      // so tombstoning them would silently convert a filter the viewer can turn off into
-      // a deletion they cannot. The client already applies both from the harvest-time
-      // flags, and a non-embeddable video that slips through fails in the player and
-      // auto-advances.
-      if (!m) dead.push({ id: r.id, why: 'gone' })
-      else if (m.privacyStatus !== 'public')
-        dead.push({ id: r.id, why: 'not-public' })
-    }
-    checked += batch.length
-  }
-} catch (err) {
-  if (err instanceof ApiKeyError) {
-    console.error(`FATAL: ${err.message}`)
-    process.exit(1)
-  }
-  if (!(err instanceof QuotaExceeded)) throw err
-  console.log('quota exhausted mid-sweep; recording what was checked')
-}
-
 // A sweep that suddenly declares most of the pool dead is far more likely to be a bad
 // API response than reality: videos.list returning HTTP 200 with an empty `items` array
 // is neither QuotaExceeded nor ApiKeyError, and would mark every id checked as 'gone'.
@@ -162,14 +125,92 @@ const ALLOW_MASS_REMOVAL = process.env.ALLOW_MASS_REMOVAL === '1'
 // to be inert — whenever dead/checked exceeds the ratio, dead already exceeds any small
 // percentage of checked, so the ratio always decides. A constant says what it does.
 const MIN_ABSOLUTE_REMOVALS = 3
+
+const dead = []
+let checked = 0
+let truncatedBatches = 0
+let refusedBatches = 0
+try {
+  for (let i = 0; i < all.length; i += 50) {
+    const batch = all.slice(i, i + 50)
+    const meta = await videosMeta(
+      key,
+      batch.map((r) => r.id),
+    )
+    const seen = new Map(meta.map((m) => [m.id, m]))
+
+    // An id absent from the response is NOT yet gone. On 2026-10-01, 22 of 219
+    // `videos.list` batches came back HTTP 200 with only 1-4 of their 50 items — no
+    // error, no quota signal — and the sweep tombstoned the other 1,062 live videos. That
+    // run removed 9.7% of the pool, under the whole-run guard below, and tombstones are
+    // never re-checked. So every miss is confirmed by a second, independent call for
+    // exactly the missing ids (one unit per batch that has any), and a batch whose
+    // CONFIRMED misses still exceed the guard ratio is refused on its own: a bad response
+    // repeating is likelier than that many deletions clustered among 50 neighbours.
+    let missing = batch.filter((r) => !seen.has(r.id))
+    if (missing.length > 0) {
+      const again = await videosMeta(
+        key,
+        missing.map((r) => r.id),
+      )
+      for (const m of again) seen.set(m.id, m)
+      const still = missing.filter((r) => !seen.has(r.id))
+      if (still.length < missing.length) truncatedBatches++
+      missing = still
+    }
+    let gone = new Set(missing.map((r) => r.id))
+    if (
+      !ALLOW_MASS_REMOVAL &&
+      gone.size >= MIN_ABSOLUTE_REMOVALS &&
+      gone.size / batch.length > MAX_REMOVAL_RATIO
+    ) {
+      refusedBatches++
+      console.error(
+        `REFUSING to tombstone ${gone.size} of ${batch.length} ids in one batch ` +
+          `(>${MAX_REMOVAL_RATIO * 100}%) even though a second call also omitted them: ` +
+          `a repeated bad response is likelier than that many deletions among ` +
+          `${batch.length} neighbours. Nothing was written for this batch; it is ` +
+          `re-examined on the next pass.`,
+      )
+      gone = new Set()
+    }
+
+    for (const r of batch) {
+      const m = seen.get(r.id)
+      // ONLY permanent states are tombstoned, because a tombstone is a deletion: the
+      // client applies `excluded` before the safeMode check, so anything in here is gone
+      // for every viewer regardless of their toggle.
+      //
+      // Embeddability and age-restriction are deliberately NOT tombstoned. Both are
+      // toggle-GOVERNED filters — docs/DESIGN.md §5.2 promises the opt-out lifts both —
+      // so tombstoning them would silently convert a filter the viewer can turn off into
+      // a deletion they cannot. The client already applies both from the harvest-time
+      // flags, and a non-embeddable video that slips through fails in the player and
+      // auto-advances.
+      if (!m) {
+        if (gone.has(r.id)) dead.push({ id: r.id, why: 'gone' })
+      } else if (m.privacyStatus !== 'public')
+        dead.push({ id: r.id, why: 'not-public' })
+    }
+    checked += batch.length
+  }
+} catch (err) {
+  if (err instanceof ApiKeyError) {
+    console.error(`FATAL: ${err.message}`)
+    process.exit(1)
+  }
+  if (!(err instanceof QuotaExceeded)) throw err
+  console.log('quota exhausted mid-sweep; recording what was checked')
+}
+
 const wipedEverything = checked > 0 && dead.length === checked
-const refused =
+const refusedWindow =
   !ALLOW_MASS_REMOVAL &&
   (wipedEverything ||
     (dead.length >= MIN_ABSOLUTE_REMOVALS &&
       dead.length / checked > MAX_REMOVAL_RATIO))
 
-if (refused) {
+if (refusedWindow) {
   // Discard this window's findings but KEEP MOVING. Exiting here left the cursor
   // unadvanced, so the identical window was retried every night forever — burning the
   // budget, never re-validating anything else, and (under continue-on-error in CI)
@@ -184,6 +225,9 @@ if (refused) {
   )
   dead.length = 0
 }
+// Either kind of refusal is surfaced the same way: a refused batch is not a crash, but
+// it must not be quiet either.
+const refused = refusedWindow || refusedBatches > 0
 
 // Advance only past what was actually CHECKED. A run cut short by quota must not skip the
 // records it never reached — that would leave permanent holes in coverage, which is the
@@ -232,6 +276,11 @@ manifest.stats = {
     byReason,
     // Surfaced so CI can alarm on it: a refusal is not a crash, but it must not be quiet.
     refused,
+    // How often a response was missing ids that a second call then returned, and how
+    // often a batch was refused outright. One of either is routine; a run of them means
+    // videos.list is flaking.
+    truncatedBatches,
+    refusedBatches,
   },
   tombstoned: known.size,
   sweepCursor: state.sweepCursor,

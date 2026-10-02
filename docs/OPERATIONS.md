@@ -266,6 +266,18 @@ genuine deletions on a young pool are not blocked — or if nothing at all survi
 whole pool permanently. If a large cleanup really is legitimate, re-run with
 `ALLOW_MASS_REMOVAL=1`.
 
+That whole-run guard was not enough on its own. On 2026-10-01 twenty-two of the night's
+219 `videos.list` batches came back HTTP 200 with one to four of their 50 items and no
+error, and the sweep tombstoned 1,062 live videos: 9.7% of the pool, under the 20% line.
+So each 50-id batch is now guarded by itself. An id absent from a response is confirmed
+by a second call for exactly the missing ids before it counts as gone (one extra unit per
+batch that had any miss, so a handful a night), and a batch whose _confirmed_ misses
+still exceed 20% (same floor of 3) is refused on its own while the rest of the window is
+written normally. `manifest.json` records both under `stats.lastSweep` as
+`truncatedBatches` (a second call revived something) and `refusedBatches`; a refused
+batch sets `refused` and opens the same harvester-health issue as a refused window.
+`ALLOW_MASS_REMOVAL=1` lifts the batch guard too.
+
 ```bash
 git clone --branch pool --single-branch \
   git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git pool-data

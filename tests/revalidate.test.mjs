@@ -34,17 +34,25 @@ const priv = new Set((process.env.STUB_PRIVATE ?? '').split(',').filter(Boolean)
 const age = new Set((process.env.STUB_AGE ?? '').split(',').filter(Boolean))
 const noembed = new Set((process.env.STUB_NOEMBED ?? '').split(',').filter(Boolean))
 const quotaAfter = Number(process.env.STUB_QUOTA_AFTER ?? 0)
+// STUB_TRUNCATE lists 0-based call indices whose response is cut to its first two items:
+// HTTP 200, no error, most ids silently absent — what videos.list did on 2026-10-01.
+const truncate = new Set(
+  (process.env.STUB_TRUNCATE ?? '').split(',').filter(Boolean).map(Number),
+)
 let seen = 0
+let calls = 0
 export async function videosMeta(key, ids) {
   if (quotaAfter && seen >= quotaAfter) throw new QuotaExceeded('stub quota')
   seen += ids.length
+  const call = calls++
   // Absent from the response == deleted, which is what the real API does.
-  return ids.filter((i) => !dead.has(i)).map((i) => ({
+  const items = ids.filter((i) => !dead.has(i)).map((i) => ({
     id: i,
     privacyStatus: priv.has(i) ? 'private' : 'public',
     embeddable: !noembed.has(i),
     ageRestricted: age.has(i),
   }))
+  return truncate.has(call) ? items.slice(0, 2) : items
 }
 `
 
@@ -257,6 +265,59 @@ describe('mass-removal guard', () => {
     const r = run({ STUB_DEAD: dead.join(','), ALLOW_MASS_REMOVAL: '1' })
     expect(r.code, r.out).toBe(0)
     expect(tombs()).toHaveLength(80)
+  })
+})
+
+// 2026-10-01: 22 of 219 videos.list batches returned HTTP 200 with 1-4 of 50 items and
+// 1,062 live videos were tombstoned — 9.7% of the pool, under the whole-run guard. The
+// stub's call order is: batch 0, its confirmation (if anything was missing), batch 1, ...
+describe('truncated API responses', () => {
+  const manifest = () =>
+    JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+
+  it('confirms a miss with a second call instead of trusting one response', () => {
+    seed(100)
+    const r = run({ STUB_TRUNCATE: '0' })
+    expect(r.code, r.out).toBe(0)
+    expect(
+      tombs(),
+      'ids the second call returned must not be tombstoned',
+    ).toEqual([])
+    expect(manifest().stats.lastSweep.truncatedBatches).toBe(1)
+    expect(manifest().stats.lastSweep.refusedBatches).toBe(0)
+    expect(manifest().stats.lastSweep.refused).toBe(false)
+  })
+
+  it('still tombstones a genuine deletion the confirmation call also misses', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0', STUB_DEAD: id(7) })
+    expect(tombs()).toEqual([id(7)])
+  })
+
+  it('refuses a batch the API truncated twice rather than tombstoning it', () => {
+    seed(100)
+    const r = run({ STUB_TRUNCATE: '0,1' })
+    expect(r.code, 'a refused batch must not fail the run').toBe(0)
+    expect(r.out).toMatch(/REFUSING/)
+    expect(tombs()).toEqual([])
+    expect(manifest().stats.lastSweep.refusedBatches).toBe(1)
+    expect(manifest().stats.lastSweep.refused, 'must not be silent').toBe(true)
+    expect(state().sweepCursor, 'the cursor must still advance').toBe(0) // wrapped
+    expect(state().sweeps).toBe(1)
+  })
+
+  it('does not let a refused batch block findings elsewhere in the window', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0,1', STUB_DEAD: id(60) })
+    expect(tombs()).toEqual([id(60)])
+  })
+
+  it('lets the deliberate override through at batch level too', () => {
+    seed(100)
+    run({ STUB_TRUNCATE: '0,1', ALLOW_MASS_REMOVAL: '1' })
+    // Each truncated call keeps two items: the batch call and the confirmation call
+    // between them return four of the 50, so 46 are written.
+    expect(tombs()).toHaveLength(46)
   })
 })
 
