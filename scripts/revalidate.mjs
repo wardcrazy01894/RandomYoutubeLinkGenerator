@@ -143,36 +143,54 @@ try {
     // `videos.list` batches came back HTTP 200 with only 1-4 of their 50 items — no
     // error, no quota signal — and the sweep tombstoned the other 1,062 live videos. That
     // run removed 9.7% of the pool, under the whole-run guard below, and tombstones are
-    // never re-checked. So every miss is confirmed by a second, independent call for
-    // exactly the missing ids (one unit per batch that has any), and a batch whose
-    // CONFIRMED misses still exceed the guard ratio is refused on its own: a bad response
-    // repeating is likelier than that many deletions clustered among 50 neighbours.
-    let missing = batch.filter((r) => !seen.has(r.id))
-    if (missing.length > 0) {
+    // never re-checked. So an id is written as gone only when two independent responses
+    // agree AND nothing in its batch suggests the API was truncating:
+    //
+    //   - A first response already missing more than the guard ratio is refused outright,
+    //     no second call: that shape is what truncation looks like, and whether a retry
+    //     happens to recover it says nothing about the ids it would still leave out.
+    //   - Otherwise the misses are re-queried in a second call for exactly those ids (one
+    //     unit per batch that had any). If that call returns anything the first omitted,
+    //     the API flaked on this batch, and the remainder is not trusted either: a genuine
+    //     deletion among them simply waits for the next pass. Only misses both calls
+    //     agree on are tombstoned.
+    //
+    // Only `gone` is guarded this way. A private video is an item the API DID return, so
+    // mass-private is left to the whole-run guard below.
+    const missing = batch.filter((r) => !seen.has(r.id))
+    let gone = new Set()
+    if (
+      !ALLOW_MASS_REMOVAL &&
+      missing.length >= MIN_ABSOLUTE_REMOVALS &&
+      missing.length / batch.length > MAX_REMOVAL_RATIO
+    ) {
+      refusedBatches++
+      console.error(
+        `REFUSING to tombstone ${missing.length} of ${batch.length} ids in one batch ` +
+          `(>${MAX_REMOVAL_RATIO * 100}%): that many deletions among ${batch.length} ` +
+          `neighbours is far less likely than a truncated response. Nothing was written ` +
+          `for this batch; it is re-examined on the next pass. If the cluster really is ` +
+          `dead, re-run with ALLOW_MASS_REMOVAL=1 on a night the API is healthy.`,
+      )
+    } else if (missing.length > 0) {
       const again = await videosMeta(
         key,
         missing.map((r) => r.id),
       )
       for (const m of again) seen.set(m.id, m)
       const still = missing.filter((r) => !seen.has(r.id))
-      if (still.length < missing.length) truncatedBatches++
-      missing = still
-    }
-    let gone = new Set(missing.map((r) => r.id))
-    if (
-      !ALLOW_MASS_REMOVAL &&
-      gone.size >= MIN_ABSOLUTE_REMOVALS &&
-      gone.size / batch.length > MAX_REMOVAL_RATIO
-    ) {
-      refusedBatches++
-      console.error(
-        `REFUSING to tombstone ${gone.size} of ${batch.length} ids in one batch ` +
-          `(>${MAX_REMOVAL_RATIO * 100}%) even though a second call also omitted them: ` +
-          `a repeated bad response is likelier than that many deletions among ` +
-          `${batch.length} neighbours. Nothing was written for this batch; it is ` +
-          `re-examined on the next pass.`,
-      )
-      gone = new Set()
+      if (still.length < missing.length) {
+        truncatedBatches++
+        if (!ALLOW_MASS_REMOVAL && still.length > 0) {
+          console.error(
+            `deferring ${still.length} miss(es): the second call returned ` +
+              `${missing.length - still.length} id(s) the first omitted, so this batch's ` +
+              `responses are not trusted tonight`,
+          )
+          still.length = 0
+        }
+      }
+      gone = new Set(still.map((r) => r.id))
     }
 
     for (const r of batch) {

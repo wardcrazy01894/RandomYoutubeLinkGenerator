@@ -269,14 +269,31 @@ whole pool permanently. If a large cleanup really is legitimate, re-run with
 That whole-run guard was not enough on its own. On 2026-10-01 twenty-two of the night's
 219 `videos.list` batches came back HTTP 200 with one to four of their 50 items and no
 error, and the sweep tombstoned 1,062 live videos: 9.7% of the pool, under the 20% line.
-So each 50-id batch is now guarded by itself. An id absent from a response is confirmed
-by a second call for exactly the missing ids before it counts as gone (one extra unit per
-batch that had any miss, so a handful a night), and a batch whose _confirmed_ misses
-still exceed 20% (same floor of 3) is refused on its own while the rest of the window is
-written normally. `manifest.json` records both under `stats.lastSweep` as
-`truncatedBatches` (a second call revived something) and `refusedBatches`; a refused
-batch sets `refused` and opens the same harvester-health issue as a refused window.
-`ALLOW_MASS_REMOVAL=1` lifts the batch guard too.
+So each 50-id batch is now guarded by itself, and an id is written as `gone` only when two
+responses agree and nothing in its batch looked truncated:
+
+- A first response already missing more than 20% of the batch (same floor of 3) is
+  **refused** without a second call. The rest of the window is written normally and the
+  cursor still advances.
+- A smaller miss is re-queried in a second call for exactly those ids (one extra unit per
+  batch that had any, so a handful a night). If that call returns anything the first
+  omitted, the batch is treated as flaky and its remaining misses are **deferred** to the
+  next pass rather than tombstoned. A dead video can wait a night; a live one cannot come
+  back.
+
+Only `gone` is guarded this way: a private video is an item the API did return, so a
+mass-private batch is left to the whole-run guard. `manifest.json` records
+`stats.lastSweep.refusedBatches` and `truncatedBatches` (a second call revived something);
+a refused batch sets `refused` and opens the same harvester-health issue as a refused
+window. One of either is routine; a run of them means `videos.list` is flaking.
+
+A genuinely dead cluster of more than 10 contiguous records would be refused every night,
+because the batch alignment is stable while the pool is under 25k records and refusing
+the batch is what keeps the alignment stable. The escape is a manual
+`ALLOW_MASS_REMOVAL=1` run (it is not wired into `harvest.yml`), which lifts the batch
+guard **and** the whole-run guard, and trusts whatever the second call leaves missing. Run
+it only on a night `lastSweep.truncatedBatches` and `refusedBatches` are zero: under a
+flaking API it tombstones live videos in exactly the way the guards exist to prevent.
 
 ```bash
 git clone --branch pool --single-branch \
