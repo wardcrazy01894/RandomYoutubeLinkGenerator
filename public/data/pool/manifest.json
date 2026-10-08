@@ -1,40 +1,41 @@
 {
   "version": 1,
   "shardSize": 1000,
-  "total": 11283,
-  "servable": 11283,
-  "generatedAt": "2026-10-02T14:43:26.070Z",
+  "total": 12577,
+  "servable": 12577,
+  "generatedAt": "2026-10-07T15:32:29.035Z",
   "health": {
     "freshPlanned": 63,
-    "freshAttempted": 63,
-    "reharvestAttempted": 4,
+    "freshAttempted": 57,
+    "reharvestAttempted": 0,
     "truncated": false,
-    "yieldAll": 4.582089552238806,
+    "yieldAll": 4.0701754385964914,
     "status": "ok",
-    "lastRunUtc": "2026-10-02T14:43:26.070Z",
-    "buckets": 67,
-    "yield": 4.857142857142857,
-    "baselineYield": 4.769192389500637
+    "lastRunUtc": "2026-10-07T15:32:29.035Z",
+    "buckets": 57,
+    "yield": 4.0701754385964914,
+    "baselineYield": 4.544983597273899
   },
   "stats": {
     "prefixLength": 5,
     "prefixSpace": 39357381,
-    "bucketsEverDrawn": 2655,
-    "embeddablePct": 99.7,
+    "bucketsEverDrawn": 2962,
+    "embeddablePct": 99.1,
     "ageRestrictedPct": 0,
     "minUploadAgeDays": 30,
     "lastSweep": {
-      "at": "2026-10-02T14:45:23.216Z",
-      "checked": 10164,
-      "removed": 4,
+      "at": "2026-10-07T15:34:36.784Z",
+      "checked": 12501,
+      "removed": 3,
       "byReason": {
-        "gone": 3,
-        "not-public": 1
+        "gone": 3
       },
-      "refused": false
+      "refused": false,
+      "truncatedBatches": 0,
+      "refusedBatches": 0
     },
-    "tombstoned": 61,
+    "tombstoned": 79,
     "sweepCursor": 0,
-    "sweepsCompleted": 45
+    "sweepsCompleted": 50
   }
 }
