@@ -128,6 +128,12 @@ collides with thousands of title and description matches. That is a property of 
 string_, not of the videos whose IDs begin with it — those are random with respect to it.
 So the drop costs ~17% of yield without skewing what survives.
 
+The same whole-bucket rule applies at enrichment. An id that search returned but
+`videos.list` omits — even on a confirming second call, the same check `revalidate.mjs`
+uses since the 2026-10-01 truncation incident — drops its entire bucket, which is counted
+in `manifest.health.bucketsDroppedUnconfirmed` and returns on re-harvest. See
+RANDOMNESS.md ("Unexhaustible buckets") for why that is close to, but not exactly, independent of the videos.
+
 #### 3.3.4 Recall — measured, and it is high
 
 Revision 2 flagged this as the largest threat to the whole project. Web search returned
@@ -342,8 +348,15 @@ Fatal, run-level assertions in `harvest.mjs`:
 - **API error taxonomy** — `quotaExceeded` is expected and exits 0 cleanly; `keyInvalid`,
   `accessNotConfigured`, and 403s are fatal and distinct.
 - **Yield gate** — run-level videos/bucket below half the rolling baseline exits non-zero.
-- **Exhaustion gate** — buckets that cannot be proven exhausted are dropped and counted;
-  above a threshold, fail.
+- **Exhaustion accounting** — buckets that cannot be proven exhausted are dropped and
+  counted in the log. There is no threshold that fails the run.
+- **Enrichment gate** — fewer than half of the found ids surviving enrichment exits
+  non-zero (`enrich-collapsed`). The yield gate measures search, so without this a
+  `videos.list` that silently returned nothing would append zero records under `ok`.
+- **Quota before enrichment** — Google's quota is project-wide, so running out mid-loop
+  also blocks `videos.list`. The run commits nothing, leaves the counter alone so the same
+  buckets are redrawn, and exits non-zero (`quota-before-enrich`): the local budget exists
+  so that this never happens, so reaching it means something else spent the quota.
 - **Mechanism canary** — a known dash-token ID must be retrievable by its own token every
   run. This is the single check that catches YouTube changing the tokenizer.
 

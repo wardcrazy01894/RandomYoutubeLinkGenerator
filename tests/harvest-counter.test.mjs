@@ -8,6 +8,7 @@ import {
   mkdirSync,
   cpSync,
   existsSync,
+  readdirSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -40,7 +41,19 @@ const failAt = Number(process.env.STUB_FAIL_AT ?? 0)
 const failAll = process.env.STUB_FAIL_ALL === '1'
 const quotaAt = Number(process.env.STUB_QUOTA_AT ?? 0)
 const perBucket = Number(process.env.STUB_PER_BUCKET ?? 2)
-export async function searchPage(key, q) {
+// Bucket-shaped knobs, keyed on the k-th DISTINCT bucket queried (1-based).
+const unexhaustedAt = Number(process.env.STUB_UNEXHAUSTED_AT ?? 0)
+const goneAt = Number(process.env.STUB_META_GONE_AT ?? 0)
+const missingOnce = Number(process.env.STUB_META_MISSING_ONCE ?? 0)
+const metaEmpty = process.env.STUB_META_EMPTY === '1'
+const nonPublic = process.env.STUB_META_NONPUBLIC === '1'
+const buckets = []
+// Google's quota is project-wide and stays exhausted until it resets, so once any call
+// has hit it, every later call (videos.list included) hits it too. The stub used to let
+// videosMeta succeed after a search QuotaExceeded, which no real run can do.
+let quotaGone = false
+let metaCalls = 0
+export async function searchPage(key, q, pageToken) {
   // The canary runs first and must resolve, or harvest aborts before the loop.
   // Logged to its OWN file: the bucket log below cannot distinguish "checked before the
   // canary" from "checked after it", so a regression that burns the canary's 100 units
@@ -50,18 +63,38 @@ export async function searchPage(key, q) {
     return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
   }
   calls++
-  if (quotaAt && calls === quotaAt) throw new QuotaExceeded('stub quota')
+  if (quotaGone) throw new QuotaExceeded('stub quota (still exhausted)')
+  if (quotaAt && calls === quotaAt) {
+    quotaGone = true
+    throw new QuotaExceeded('stub quota')
+  }
   if (failAll) throw new Error('stub total outage')
   if (failAt && calls === failAt) throw new Error('stub 503')
-  appendFileSync(process.env.STUB_LOG, q + '\\n')
+  if (!pageToken) {
+    appendFileSync(process.env.STUB_LOG, q + '\\n')
+    buckets.push(q)
+  }
   const ids = []
   for (let i = 0; i < perBucket; i++) ids.push(q + '-' + String.fromCharCode(97 + i).repeat(5))
-  return { ids, nextPageToken: null, totalResults: ids.length }
+  // A bucket that never runs out of pages: the harvester must reject it whole.
+  const more = unexhaustedAt && buckets.indexOf(q) === unexhaustedAt - 1
+  return { ids, nextPageToken: more ? 'more' : null, totalResults: ids.length }
 }
+const bucketOf = (id) => id.slice(0, id.lastIndexOf('-'))
 export async function videosMeta(key, ids) {
-  return ids.map((id) => ({
+  if (quotaGone) throw new QuotaExceeded('stub quota (still exhausted)')
+  metaCalls++
+  if (metaEmpty) return []
+  let served = ids
+  // Permanently absent: every member of the k-th bucket, on every call.
+  if (goneAt) served = served.filter((id) => bucketOf(id) !== buckets[goneAt - 1])
+  // Truncated FIRST response only (the 2026-10-01 shape); a second call returns them.
+  if (missingOnce && metaCalls === 1) served = served.slice(0, served.length - missingOnce)
+  return served.map((id) => ({
     id, title: 't', publishedAt: '2020-01-01T00:00:00Z',
-    embeddable: true, privacyStatus: 'public', ageRestricted: false,
+    embeddable: true,
+    privacyStatus: nonPublic && id.endsWith('-bbbbb') ? 'unlisted' : 'public',
+    ageRestricted: false,
     duration: 'PT1M', views: 1, madeForKids: false,
   }))
 }
@@ -94,6 +127,12 @@ function run(env = {}) {
 const state = () => JSON.parse(readFileSync(join(pool, 'state.json'), 'utf8'))
 const manifest = () =>
   JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+/** Every id committed to the pool, across all shards. */
+const pooled = () =>
+  readdirSync(pool)
+    .filter((f) => /^shard-\d+\.json$/.test(f))
+    .flatMap((f) => JSON.parse(readFileSync(join(pool, f), 'utf8')))
+    .map((r) => r.id)
 const queried = () =>
   existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []
 /** Whether the canary search actually went out — the 100 units a pre-flight must save. */
@@ -186,12 +225,21 @@ describe('harvest counter', () => {
     expect(queried().length).toBeLessThanOrEqual(1)
   })
 
-  it('exits cleanly on quota exhaustion and still counts only what it queried', () => {
+  // Quota is project-wide, so a QuotaExceeded mid-loop also blocks videos.list. The
+  // found ids cannot be enriched; committing nothing and leaving the counter alone means
+  // the same buckets are redrawn, rather than skipped with their videos thrown away.
+  it('commits nothing and keeps the counter when quota runs out before enrichment', () => {
     const r = run({ HARVEST_UNITS: '3000', STUB_QUOTA_AT: '4' })
-    expect(r.code).toBe(0)
-    const s = state()
-    assertNoGaps(0, s.counter)
-    expect(s.counter).toBe(queried().length)
+    expect(r.code, r.out).toBe(1)
+    expect(r.out).toMatch(
+      /quota ran out before \d+ found ids could be enriched/,
+    )
+    expect(manifest().health.status).toBe('quota-before-enrich')
+    expect(
+      state().counter,
+      'buckets that were never enriched must be redrawn',
+    ).toBe(0)
+    expect(pooled()).toEqual([])
   })
 })
 
@@ -456,5 +504,62 @@ describe('budget floor', () => {
     // The stub does not log the canary, so this counts real buckets. Exactly one fits:
     // the first search leaves 300, below the 400 reserve, so the loop stops there.
     expect(queried().length, 'the floor must permit exactly one bucket').toBe(1)
+  })
+})
+
+// The stub used to report every bucket exhausted and every id public, so none of the
+// paths below — the ones that decide WHICH videos enter the pool — had a test.
+describe('what enters the pool', () => {
+  it('drops an unexhausted bucket whole and keeps the others', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_UNEXHAUSTED_AT: '2' })
+    expect(r.code, r.out).toBe(0)
+    const [first, second, third] = queried()
+    expect(second, 'the run must reach the bucket under test').toBeDefined()
+    const ids = pooled()
+    expect(ids.filter((id) => id.startsWith(`${second}-`))).toEqual([])
+    expect(ids).toContain(`${first}-aaaaa`)
+    if (third) expect(ids).toContain(`${third}-aaaaa`)
+    expect(r.out).toMatch(/1 buckets dropped as unexhausted/)
+  })
+
+  it('keeps ids that a truncated first videos.list response omitted but a retry returned', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_MISSING_ONCE: '2' })
+    expect(r.code, r.out).toBe(0)
+    expect(pooled()).toHaveLength(queried().length * 2)
+    expect(r.out).toMatch(/2 came back on a second call\. Dropping 0 buckets/)
+    expect(manifest().health.revivedOnRetry).toBe(2)
+  })
+
+  it('drops the whole bucket of an id still missing after the retry', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_GONE_AT: '1' })
+    expect(r.code, r.out).toBe(0)
+    const [first, ...rest] = queried()
+    const ids = pooled()
+    expect(ids.filter((id) => id.startsWith(`${first}-`))).toEqual([])
+    expect(ids).toHaveLength(rest.length * 2)
+    const h = manifest().health
+    expect(h.bucketsDroppedUnconfirmed).toBe(1)
+    expect(h.inDroppedBuckets).toBe(2)
+  })
+
+  it('reports non-public and too-fresh separately, and they sum to what was found', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_NONPUBLIC: '1' })
+    expect(r.code, r.out).toBe(0)
+    const h = manifest().health
+    expect(h.nonPublic).toBe(queried().length)
+    expect(
+      h.appended + h.nonPublic + h.heldBackFresh + h.inDroppedBuckets,
+    ).toBe(h.found)
+    expect(r.out).toMatch(new RegExp(`${h.nonPublic} non-public`))
+  })
+
+  // The yield gate measures search, so a videos.list that silently returns nothing
+  // would append zero records every night under "ok".
+  it('alarms when enrichment keeps almost nothing, and commits nothing', () => {
+    const r = run({ HARVEST_UNITS: '2600', STUB_META_EMPTY: '1' })
+    expect(r.code, r.out).toBe(1)
+    expect(manifest().health.status).toBe('enrich-collapsed')
+    expect(state().counter).toBe(0)
+    expect(pooled()).toEqual([])
   })
 })

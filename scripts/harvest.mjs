@@ -100,6 +100,8 @@ let reharvestAttempted = 0
 // while a later one gets queried twice.
 let freshHole = false
 let freshNew = 0
+// What enrichment did with what search found. Declared here for the same TDZ reason.
+let enrichShape = {}
 
 // The loop refuses to START a bucket without MAX_PAGES+1 searches in reserve, so that a
 // bucket it begins can always be paged to exhaustion — a partial bucket is truncated in
@@ -200,8 +202,10 @@ for (const { n, fresh } of plan) {
     const { ids, exhausted } = await harvestBucket(q)
     bucketsDone++
     // Count the prefix consumed only once the query actually came back. Counting
-    // before the try burned prefixes on every throw — and because HARVEST_UNITS sits
-    // just under the daily quota, a QuotaExceeded throw is the NORMAL way a run ends.
+    // before the try burned prefixes on every throw, a QuotaExceeded included. (A healthy
+    // run ends on the local HARVEST_UNITS budget, which sits under Google's quota, so
+    // QuotaExceeded means something else spent the quota — and it then also blocks
+    // enrichment; see there.)
     // An unexhausted bucket still counts: it was queried and deliberately rejected,
     // so retrying it forever would stall the counter behind one bad prefix.
     if (fresh) {
@@ -255,6 +259,12 @@ async function harvestBucket(q) {
   return { ids, exhausted: false }
 }
 
+async function enrich(ids) {
+  const meta = await videosMeta(key, ids)
+  spend(Math.ceil(ids.length / 50) * COST.videos)
+  return meta
+}
+
 const yieldPer = bucketsDone > 0 ? found.size / bucketsDone : 0
 // What the baseline tracks and the gate compares: new videos per FRESH bucket. null when
 // no fresh bucket completed — a distinct condition from "zero yield", alarmed separately.
@@ -266,15 +276,88 @@ if (unexhausted > 0)
   console.warn(`${unexhausted} buckets dropped as unexhausted`)
 
 // --- enrich -----------------------------------------------------------------
+// Mandatory whenever search found anything. This used to be skipped when the local
+// budget read zero, which discarded every found id while the counter still advanced
+// past their buckets. The local budget is advisory (the real cap is Google's), and the
+// loop's reserve leaves at least one page's worth for this anyway.
 let records = []
-if (found.size > 0 && remaining() > 0) {
-  const meta = await videosMeta(key, [...found.keys()])
-  spend(Math.ceil(found.size / 50) * COST.videos)
+if (found.size > 0) {
+  let meta
+  try {
+    meta = await enrich([...found.keys()])
+  } catch (err) {
+    // Quota is project-wide, so after a QuotaExceeded in the loop this call cannot
+    // succeed either; it used to escape here as an unhandled stack trace. Nothing can be
+    // committed without metadata, so commit nothing and leave state alone: the same
+    // prefixes are drawn again next run, at the cost of re-spending their searches.
+    // Fatal rather than quiet, because the 9000-unit local budget exists precisely so
+    // Google's quota is never reached — reaching it means something else is spending
+    // it, and a nightly repeat would freeze the frontier with nobody told.
+    if (err instanceof QuotaExceeded) {
+      console.error(
+        `FATAL: quota ran out before ${found.size} found ids could be enriched. ` +
+          `Nothing committed; the counter is unchanged and the same buckets are redrawn next run.`,
+      )
+      recordHealth('quota-before-enrich', bucketsDone, null, runShape())
+      process.exit(1)
+    }
+    if (err instanceof ApiKeyError) {
+      console.error(`FATAL: ${err.message}`)
+      process.exit(1)
+    }
+    throw err
+  }
+
+  // Search returned these ids moments ago, so videos.list omitting one is either a
+  // truncated response — the 2026-10-01 shape: HTTP 200 with 1–4 of 50 items — or a
+  // video that went private or was deleted in between. revalidate.mjs has the same
+  // problem and confirms with a second call; so does this. An id still missing after
+  // that is ambiguous, and dropping just that id would keep a bucket with a member
+  // missing for a reason we cannot see — a partial bucket (§3.3.3). So its WHOLE bucket
+  // is dropped. It is counted like an unexhausted one and comes back on re-harvest.
+  const got = new Set(meta.map((m) => m.id))
+  const missing = [...found.keys()].filter((id) => !got.has(id))
+  const droppedBuckets = new Set()
+  let revived = 0
+  if (missing.length > 0) {
+    let second
+    try {
+      second = await enrich(missing)
+    } catch (err) {
+      // Same reasoning as above, but by now nothing is ambiguous about the quota.
+      if (err instanceof QuotaExceeded) {
+        console.error(
+          `FATAL: quota ran out while confirming ${missing.length} ids missing from videos.list. ` +
+            `Nothing committed; the counter is unchanged.`,
+        )
+        recordHealth('quota-before-enrich', bucketsDone, null, runShape())
+        process.exit(1)
+      }
+      throw err
+    }
+    for (const m of second) {
+      if (got.has(m.id)) continue
+      got.add(m.id)
+      meta.push(m)
+      revived++
+    }
+    for (const id of missing) {
+      if (!got.has(id)) droppedBuckets.add(found.get(id))
+    }
+    console.warn(
+      `${missing.length} found ids were missing from videos.list; ${revived} came back on a ` +
+        `second call. Dropping ${droppedBuckets.size} buckets whole for the rest.`,
+    )
+  }
+  const inDroppedBucket = (id) => droppedBuckets.has(found.get(id))
+
   const stamp = runStarted.toISOString()
   const uploadCutoff = runStarted.getTime() - MIN_UPLOAD_AGE_DAYS * 86400_000
   const isSeasoned = (m) =>
     m.publishedAt && new Date(m.publishedAt).getTime() < uploadCutoff
-  const publicMeta = meta.filter((m) => m.privacyStatus === 'public')
+  const kept = meta.filter((m) => !inDroppedBucket(m.id))
+  const publicMeta = kept.filter((m) => m.privacyStatus === 'public')
+  const nonPublic = kept.length - publicMeta.length
   const tooFresh = publicMeta.filter((m) => !isSeasoned(m)).length
   if (tooFresh > 0)
     console.log(
@@ -291,9 +374,39 @@ if (found.size > 0 && remaining() > 0) {
     mfk: m.madeForKids,
     h: stamp,
   }))
+  // Every found id lands in exactly one of these, so they sum to found.size. The old
+  // line reported meta.length - records.length as "non-public dropped", which lumped
+  // too-fresh in with non-public and never counted ids missing from the response at all.
+  enrichShape = {
+    found: found.size,
+    appended: records.length,
+    heldBackFresh: tooFresh,
+    nonPublic,
+    inDroppedBuckets: found.size - kept.length,
+    bucketsDroppedUnconfirmed: droppedBuckets.size,
+    revivedOnRetry: revived,
+  }
   console.log(
-    `enriched ${records.length} public videos (${meta.length - records.length} non-public dropped)`,
+    `enriched ${found.size} found ids: ${records.length} appended, ${tooFresh} held back ` +
+      `as too fresh, ${nonPublic} non-public, ${found.size - kept.length} in ` +
+      `${droppedBuckets.size} dropped buckets`,
   )
+}
+
+// Enrichment gate. The yield gate below measures SEARCH, before enrichment, so if
+// videos.list started returning empty items or changed the shape of privacyStatus or
+// publishedAt, every night would append nothing while health still said "ok". Normally
+// only the too-fresh and the rare non-public are lost here, so a run that keeps less
+// than half of what it found is broken, not unlucky. Exits before writeState, so the same
+// buckets are redrawn once it is fixed.
+const ENRICH_FLOOR_RATIO = 0.5
+if (found.size >= 20 && records.length < found.size * ENRICH_FLOOR_RATIO) {
+  console.error(
+    `FATAL: enrichment kept ${records.length} of ${found.size} found ids, below ` +
+      `${ENRICH_FLOOR_RATIO * 100}%. Check what videos.list is returning.`,
+  )
+  recordHealth('enrich-collapsed', bucketsDone, freshYield, runShape())
+  process.exit(1)
 }
 
 // --- validity gates ---------------------------------------------------------
@@ -395,6 +508,7 @@ function runShape() {
     // Overall yield across fresh AND re-harvest buckets, for diagnosis only. The
     // baseline deliberately tracks the fresh-only number.
     yieldAll: yieldPer,
+    ...enrichShape,
   }
 }
 

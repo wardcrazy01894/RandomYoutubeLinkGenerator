@@ -85,6 +85,13 @@ Ordered by how much they should worry you.
    relevance-ranked slice. **This does not bias the sample**: the drop depends only on
    whether the _query string_ resembles text, which is independent of the videos whose IDs
    happen to start with it.
+   A bucket is also dropped whole when one of its ids comes back from search but is
+   missing from `videos.list` even on a second call — either a truncated response or a
+   video that went private or was deleted in the minutes between the two calls. Keeping
+   the rest would be a partial bucket. Truncation lands on buckets by their position in
+   the batch, independent of the videos; a just-deleted member does tie the drop to the
+   bucket's contents, but only until re-harvest draws the bucket again without it. Each
+   run records how many buckets this cost (`manifest.health.bucketsDroppedUnconfirmed`).
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
    they did not exist for earlier draws. A rolling fraction of each night's budget
    re-harvests older buckets to bound this.

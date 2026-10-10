@@ -176,16 +176,49 @@ poisons the next run's yield — so it can succeed with far fewer buckets than p
 `freshPlanned` vs `freshAttempted` shows how much was skipped. One such night is normal
 after a transient API error; several in a row means something is reliably failing.
 
-### `quotaExceeded`
+### `quotaExceeded` / "quota ran out before N found ids could be enriched"
 
-Not a failure. The 10,000 unit/day cap is a hard stop with no charge attached; the run
-exits 0 having banked whatever it collected. Quota resets at midnight Pacific.
+The 10,000 unit/day cap is a hard stop with no charge attached; quota resets at midnight
+Pacific. A healthy run never reaches it — it stops on its own 9,000-unit `HARVEST_UNITS`
+budget, leaving room for the sweep. So reaching it means something else spent quota that
+day: usually a same-day manual re-dispatch, or another project sharing the key.
+
+If it is hit during the search loop with no ids found yet, the run exits 0
+(`ok-quota-capped`). If ids were already found, they cannot be enriched — quota covers
+`videos.list` too — so the run commits nothing, leaves the counter where it was, and fails
+with `quota-before-enrich`. Nothing is lost: the next run redraws the same buckets. Find
+what else spent the quota before re-running.
+
+### "enrichment kept N of M found ids"
+
+Status `enrich-collapsed`. Normally about 96% of found ids are kept; only the too-fresh
+and the occasional non-public are lost. Below half means `videos.list` is returning
+something the harvester does not understand — empty `items`, or a changed shape for
+`privacyStatus` or `publishedAt`. Nothing was committed and the counter did not move.
+Look at a raw `videos.list` response for one of the logged buckets before changing code.
+
+### "N found ids were missing from videos.list … Dropping K buckets whole"
+
+A warning, not a failure. Search returned those ids but `videos.list` omitted them even on
+a second call, so their buckets were dropped whole rather than kept partial; they return
+on re-harvest. A handful is normal (videos deleted between the two calls). Dozens in one
+night is the 2026-10-01 truncation shape — check the next nights' counts in
+`manifest.health.bucketsDroppedUnconfirmed`.
+
+### "Harvester health: re-validation sweep crashed"
+
+The sweep step exited with an error. It runs under `continue-on-error`, so the harvest was
+still published; nothing was re-checked that night. The step's log has the error. A
+single crash after a GitHub or YouTube blip is routine. Repeated crashes mean deleted
+videos stop being tombstoned and keep being served.
 
 ### `429 rateLimitExceeded` in the log
 
 The per-minute limit, distinct from the daily quota. The client already backs off
 exponentially and paces requests at 350 ms. Occasional lines are fine; if most buckets fail
-this way, raise `PACING_MS` in `scripts/harvest.mjs`.
+this way, raise the `HARVEST_PACING_MS` env var (default 350). The error line now includes the
+endpoint and the first 300 bytes of the response body, and network errors carry their
+cause (`ECONNRESET`, `ENOTFOUND`, …).
 
 ### `! [remote rejected] HEAD -> pool (Internal Server Error)` in the Publish step
 

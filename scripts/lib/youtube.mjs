@@ -31,7 +31,12 @@ async function call(endpoint, params, key, { retries = 5 } = {}) {
     try {
       res = await fetch(url, { headers: { accept: 'application/json' } })
     } catch (err) {
-      lastErr = err
+      // undici reports every transport failure as a bare "fetch failed"; the useful part
+      // (ECONNRESET, ENOTFOUND, a TLS error) is on err.cause, and was being dropped.
+      const cause = err.cause?.code ?? err.cause?.message
+      lastErr = new Error(
+        `${endpoint} network error: ${err.message}${cause ? ` (${cause})` : ''}`,
+      )
       await sleep(500 * 2 ** attempt)
       continue
     }
@@ -56,7 +61,12 @@ async function call(endpoint, params, key, { retries = 5 } = {}) {
     if (res.status === 429 || res.status >= 500) {
       // 429 here is the per-minute rate limit, NOT the daily quota (that arrives as
       // quotaExceeded above). Backing off generously is correct and cheap.
-      lastErr = new Error(`${res.status} ${reason ?? ''}`)
+      // Endpoint and body kept: the bare "503 " this used to produce reached the harvest
+      // log as "bucket X failed: 503 " with nothing to diagnose. The body never contains
+      // the key — only the URL does, and the URL is deliberately not logged.
+      lastErr = new Error(
+        `${endpoint} failed: ${res.status} ${reason ?? ''} after ${retries + 1} attempts — ${body.slice(0, 300)}`,
+      )
       await sleep(2000 * 2 ** attempt)
       continue
     }
