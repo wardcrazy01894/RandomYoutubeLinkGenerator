@@ -161,9 +161,12 @@ gh workflow run harvest.yml -f baseline_reset=true   # relearn via the guarded p
 from this run instead of being measured against the old one. It must be exactly `1`: any
 other value, including `0`, leaves the gate armed — writing `HARVEST_BASELINE_RESET=0`
 must not be a way to silently disable the alarm. If the run is too small to relearn
-(under 20 buckets) **or truncated** — meaning it abandoned its fresh plan after a bucket
-failed — it keeps the stored baseline and says so, rather than erasing it. Check
-`manifest.health.truncated` if a reset appears not to have taken.
+(under 20 **fresh** buckets — `manifest.health.freshAttempted`; re-harvest buckets do not
+count, since the baseline is a fresh-only yield) **or truncated** — meaning it abandoned
+its fresh plan after a bucket failed — it keeps the stored baseline and says so, rather
+than erasing it. Dispatch the reset with the default `units` (9000, ~44 fresh buckets);
+a lowered budget may not reach 20. Check `manifest.health.truncated` and
+`freshAttempted` if a reset appears not to have taken.
 
 Use it deliberately, never on a schedule — on a schedule it reintroduces exactly the bug
 it replaced.
