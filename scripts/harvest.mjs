@@ -661,7 +661,8 @@ function recordHealth(status, buckets, y, extra = {}) {
   if (BASELINE_RESET && !canLearn) {
     console.warn(
       `HARVEST_BASELINE_RESET was set, but this run cannot relearn a baseline ` +
-        `(${buckets} buckets, status "${status}"). Keeping the stored value rather than ` +
+        `(${freshAttempted} fresh of ${buckets} buckets — it needs 20 fresh; status ` +
+        `"${status}"). Keeping the stored value rather than ` +
         `erasing it — re-run with a full budget to make the reset take effect.`,
     )
   }
