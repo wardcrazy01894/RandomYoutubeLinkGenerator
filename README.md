@@ -3,9 +3,9 @@
 One button. Click it, get a random YouTube video.
 
 Not a curated list, not a recommendation, not "trending". A **uniform random draw** over a
-stated ~1.44% slice of YouTube's public videos, chosen so that it does not depend on what
-the videos are — which means what you get is usually somebody's home video with a few
-dozen views, in a language you may not read. That is what YouTube actually is.
+stated ~1.44% slice of YouTube's public videos — which means what you get is usually
+somebody's home video with a few dozen views, in a language you may not read. That is what
+YouTube actually is.
 
 **[→ Open the site](https://wardcrazy01894.github.io/RandomYoutubeLinkGenerator/)**
 
@@ -27,7 +27,7 @@ it means clicking the button never touches YouTube's API.
 
 **How random is it really?** [`docs/RANDOMNESS.md`](docs/RANDOMNESS.md) states the exact
 frame and every known bias. The short version: uniform over a stated frame, not "truly
-random" — and the pool's median view count (76) and never-watched rate (2.9%) sit close to
+random" — and the pool's median view count (76) and never-watched rate (2.9%), as of 2026-10-10, sit close to
 published research (~41 and ~4%), where a popularity-biased sampler would show medians in
 the thousands.
 

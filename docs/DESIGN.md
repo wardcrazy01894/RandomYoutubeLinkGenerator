@@ -162,10 +162,11 @@ problem, not the mechanism.
 | **Measured (live, 600 buckets)** | **5.33**      |
 
 The live figure is new ids per **exhausted** bucket over the 11 harvests of 2026-09-27 to
-10-07 (3,200 ids from 600 exhausted buckets; 89 more were dropped as unexhausted). It is
-slightly low: those buckets include 15 re-harvest buckets, which return almost nothing
-new, and the ids are counted before enrichment drops ~3% as non-public or too fresh.
-Fresh buckets alone give 5.33–5.47.
+10-07 (3,200 ids from 600 exhausted buckets; 89 more were dropped as unexhausted). Two
+caveats pull in opposite directions. Those buckets include 15 re-harvest buckets, which
+return almost nothing new, so it reads slightly low — fresh buckets alone give 5.33–5.47.
+Conversely, ids are counted before enrichment drops ~3% as non-public or too fresh, which
+nudges it up.
 
 Implied recall ≈ **0.97** (roughly 0.94–1.0 at n=600), **given** a 1.5e10 corpus — recall
 and corpus size cannot both be read off one number, so this is a consistency check, not an
