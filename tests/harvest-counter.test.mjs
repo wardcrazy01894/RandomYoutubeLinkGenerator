@@ -8,6 +8,7 @@ import {
   mkdirSync,
   cpSync,
   existsSync,
+  readdirSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -32,6 +33,7 @@ let dir, pool, log, canaryLog
 const STUB = `
 import { appendFileSync } from 'node:fs'
 export const COST = { search: 100, videos: 1 }
+export const VIDEOS_CHUNK = 50
 export class QuotaExceeded extends Error {}
 export class ApiKeyError extends Error {}
 export const sleep = () => Promise.resolve()
@@ -40,7 +42,31 @@ const failAt = Number(process.env.STUB_FAIL_AT ?? 0)
 const failAll = process.env.STUB_FAIL_ALL === '1'
 const quotaAt = Number(process.env.STUB_QUOTA_AT ?? 0)
 const perBucket = Number(process.env.STUB_PER_BUCKET ?? 2)
-export async function searchPage(key, q) {
+// Bucket-shaped knobs, keyed on the k-th DISTINCT bucket queried (1-based).
+const unexhaustedAt = Number(process.env.STUB_UNEXHAUSTED_AT ?? 0)
+const goneAt = Number(process.env.STUB_META_GONE_AT ?? 0)
+// How many of that bucket's members are gone, counted from the END (default: all).
+const goneCount = Number(process.env.STUB_META_GONE_COUNT ?? Infinity)
+const metaQuotaOnCall = Number(process.env.STUB_META_QUOTA_ON_CALL ?? 0)
+const metaExtra = process.env.STUB_META_EXTRA === '1'
+// Every call loses its last N items, and an id once lost STAYS lost — a truncation that
+// hits the same ids on the confirming call as on the first.
+const tailDrop = Number(process.env.STUB_META_TAIL_DROP ?? 0)
+const tailLost = new Set()
+// Every call loses the first N items of the request, by POSITION — so an id placed first
+// in the confirming call is lost again, exactly as it was in the first call.
+const headDrop = Number(process.env.STUB_META_HEAD_DROP ?? 0)
+const metaDup = process.env.STUB_META_DUP === '1'
+const missingOnce = Number(process.env.STUB_META_MISSING_ONCE ?? 0)
+const metaEmpty = process.env.STUB_META_EMPTY === '1'
+const nonPublic = process.env.STUB_META_NONPUBLIC === '1'
+const buckets = []
+// Google's quota is project-wide and stays exhausted until it resets, so once any call
+// has hit it, every later call (videos.list included) hits it too. The stub used to let
+// videosMeta succeed after a search QuotaExceeded, which no real run can do.
+let quotaGone = false
+let metaCalls = 0
+export async function searchPage(key, q, pageToken) {
   // The canary runs first and must resolve, or harvest aborts before the loop.
   // Logged to its OWN file: the bucket log below cannot distinguish "checked before the
   // canary" from "checked after it", so a regression that burns the canary's 100 units
@@ -50,18 +76,54 @@ export async function searchPage(key, q) {
     return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
   }
   calls++
-  if (quotaAt && calls === quotaAt) throw new QuotaExceeded('stub quota')
+  if (quotaGone) throw new QuotaExceeded('stub quota (still exhausted)')
+  if (quotaAt && calls === quotaAt) {
+    quotaGone = true
+    throw new QuotaExceeded('stub quota')
+  }
   if (failAll) throw new Error('stub total outage')
   if (failAt && calls === failAt) throw new Error('stub 503')
-  appendFileSync(process.env.STUB_LOG, q + '\\n')
+  if (!pageToken) {
+    appendFileSync(process.env.STUB_LOG, q + '\\n')
+    buckets.push(q)
+  }
   const ids = []
   for (let i = 0; i < perBucket; i++) ids.push(q + '-' + String.fromCharCode(97 + i).repeat(5))
-  return { ids, nextPageToken: null, totalResults: ids.length }
+  // A bucket that never runs out of pages: the harvester must reject it whole.
+  const more = unexhaustedAt && buckets.indexOf(q) === unexhaustedAt - 1
+  return { ids, nextPageToken: more ? 'more' : null, totalResults: ids.length }
 }
+const bucketOf = (id) => id.slice(0, id.lastIndexOf('-'))
 export async function videosMeta(key, ids) {
-  return ids.map((id) => ({
+  if (quotaGone) throw new QuotaExceeded('stub quota (still exhausted)')
+  metaCalls++
+  if (metaQuotaOnCall && metaCalls === metaQuotaOnCall) {
+    quotaGone = true
+    throw new QuotaExceeded('stub quota on videos.list')
+  }
+  if (metaEmpty) return []
+  let served = ids
+  // Permanently absent, on every call: the last goneCount members of the k-th bucket.
+  if (goneAt) {
+    const members = ids.filter((id) => bucketOf(id) === buckets[goneAt - 1]).sort()
+    const dead = new Set(members.slice(Math.max(0, members.length - goneCount)))
+    served = served.filter((id) => !dead.has(id))
+  }
+  // Truncated FIRST response only (the 2026-10-01 shape); a second call returns them.
+  if (missingOnce && metaCalls === 1) served = served.slice(0, served.length - missingOnce)
+  if (tailDrop) {
+    served = served.filter((id) => !tailLost.has(id))
+    for (const id of served.slice(Math.max(0, served.length - tailDrop))) tailLost.add(id)
+    served = served.slice(0, Math.max(0, served.length - tailDrop))
+  }
+  if (headDrop) served = served.slice(headDrop)
+  if (metaDup && served.length > 0) served = [served[0], ...served]
+  if (metaExtra) served = [...served, 'zzzzzzzzzzz']
+  return served.map((id) => ({
     id, title: 't', publishedAt: '2020-01-01T00:00:00Z',
-    embeddable: true, privacyStatus: 'public', ageRestricted: false,
+    embeddable: true,
+    privacyStatus: nonPublic && id.endsWith('-bbbbb') ? 'unlisted' : 'public',
+    ageRestricted: false,
     duration: 'PT1M', views: 1, madeForKids: false,
   }))
 }
@@ -94,6 +156,12 @@ function run(env = {}) {
 const state = () => JSON.parse(readFileSync(join(pool, 'state.json'), 'utf8'))
 const manifest = () =>
   JSON.parse(readFileSync(join(pool, 'manifest.json'), 'utf8'))
+/** Every id committed to the pool, across all shards. */
+const pooled = () =>
+  readdirSync(pool)
+    .filter((f) => /^shard-\d+\.json$/.test(f))
+    .flatMap((f) => JSON.parse(readFileSync(join(pool, f), 'utf8')))
+    .map((r) => r.id)
 const queried = () =>
   existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []
 /** Whether the canary search actually went out — the 100 units a pre-flight must save. */
@@ -186,12 +254,21 @@ describe('harvest counter', () => {
     expect(queried().length).toBeLessThanOrEqual(1)
   })
 
-  it('exits cleanly on quota exhaustion and still counts only what it queried', () => {
+  // Quota is project-wide, so a QuotaExceeded mid-loop also blocks videos.list. The
+  // found ids cannot be enriched; committing nothing and leaving the counter alone means
+  // the same buckets are redrawn, rather than skipped with their videos thrown away.
+  it('commits nothing and keeps the counter when quota runs out before enrichment', () => {
     const r = run({ HARVEST_UNITS: '3000', STUB_QUOTA_AT: '4' })
-    expect(r.code).toBe(0)
-    const s = state()
-    assertNoGaps(0, s.counter)
-    expect(s.counter).toBe(queried().length)
+    expect(r.code, r.out).toBe(1)
+    expect(r.out).toMatch(
+      /quota ran out before \d+ found ids could be enriched/,
+    )
+    expect(manifest().health.status).toBe('quota-before-enrich')
+    expect(
+      state().counter,
+      'buckets that were never enriched must be redrawn',
+    ).toBe(0)
+    expect(pooled()).toEqual([])
   })
 })
 
@@ -407,6 +484,8 @@ describe('escape hatch cannot be turned into a silencer', () => {
     })
     expect(r.code, r.out).toBe(0)
     expect(manifest().health.status).toBe('ok-quota-capped')
+    // Nothing was found, so nothing needed enriching: a clean stop, no bucket counted.
+    expect(state().counter).toBe(0)
   })
 })
 
@@ -456,5 +535,210 @@ describe('budget floor', () => {
     // The stub does not log the canary, so this counts real buckets. Exactly one fits:
     // the first search leaves 300, below the 400 reserve, so the loop stops there.
     expect(queried().length, 'the floor must permit exactly one bucket').toBe(1)
+  })
+})
+
+// The stub used to report every bucket exhausted and every id public, so none of the
+// paths below — the ones that decide WHICH videos enter the pool — had a test.
+describe('what enters the pool', () => {
+  it('drops an unexhausted bucket whole and keeps the others', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_UNEXHAUSTED_AT: '2' })
+    expect(r.code, r.out).toBe(0)
+    const [first, second, third] = queried()
+    expect(second, 'the run must reach the bucket under test').toBeDefined()
+    const ids = pooled()
+    expect(ids.filter((id) => id.startsWith(`${second}-`))).toEqual([])
+    expect(ids).toContain(`${first}-aaaaa`)
+    if (third) expect(ids).toContain(`${third}-aaaaa`)
+    expect(r.out).toMatch(/1 buckets dropped as unexhausted/)
+  })
+
+  it('keeps ids that a truncated first videos.list response omitted but a retry returned', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_MISSING_ONCE: '2' })
+    expect(r.code, r.out).toBe(0)
+    expect(pooled()).toHaveLength(queried().length * 2)
+    expect(r.out).toMatch(/2 came back on a second call/)
+    expect(manifest().health.bucketsDroppedUnconfirmed).toBe(0)
+    expect(manifest().health.revivedOnRetry).toBe(2)
+  })
+
+  // A handful missing on BOTH calls, with nothing revived, are deletions: only those ids
+  // go. Dropping the bucket would keep the siblings out for a whole re-harvest rotation.
+  it('drops just a deleted id, keeping its bucket-mates, when nothing suggests truncation', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '1',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    const ids = pooled()
+    expect(ids).toContain(`${first}-aaaaa`)
+    expect(ids).not.toContain(`${first}-bbbbb`)
+    const h = manifest().health
+    expect(h.gone).toBe(1)
+    expect(h.bucketsDroppedUnconfirmed).toBe(0)
+  })
+
+  // The non-negotiable: once responses are known to truncate, a bucket with ANY member
+  // unconfirmed is dropped whole. The sibling assertion is what pins it — a bucket whose
+  // every member is missing looks the same whether it was dropped whole or id by id.
+  it('drops the whole bucket when the retry shows responses are truncating', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '1',
+      STUB_META_MISSING_ONCE: '2',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    expect(pooled(), 'a partial bucket must never be kept').not.toContain(
+      `${first}-aaaaa`,
+    )
+    expect(manifest().health.bucketsDroppedUnconfirmed).toBe(1)
+    expect(r.out).toMatch(/Responses look truncated/)
+  })
+
+  it('treats too many still-missing ids as truncation even if none were revived', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_PER_BUCKET: '6',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '4',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    const ids = pooled()
+    expect(ids).not.toContain(`${first}-aaaaa`)
+    expect(ids).not.toContain(`${first}-bbbbb`)
+    expect(manifest().health.bucketsDroppedUnconfirmed).toBe(1)
+  })
+
+  // The slip the controls close: a truncation that drops the TAIL of every request loses
+  // the same ids on both calls, revives nothing, and stays under the deletion budget — so
+  // without controls it passed as deletions and kept the rest of the bucket.
+  it('catches a truncation that drops the same tail on both calls', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_TAIL_DROP: '1' })
+    expect(r.code, r.out).toBe(0)
+    const last = queried().at(-1)
+    expect(pooled(), 'a partial bucket must never be kept').not.toContain(
+      `${last}-aaaaa`,
+    )
+    const h = manifest().health
+    expect(h.gone).toBe(0)
+    expect(h.bucketsDroppedUnconfirmed).toBe(1)
+    expect(h.controlsLost).toBeGreaterThan(0)
+  })
+
+  // With controls only at the end, the missing id would sit first in the confirming call,
+  // be lost again, and pass as a deletion — keeping its bucket-mate.
+  it('catches a truncation that drops the head of every request', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_HEAD_DROP: '1' })
+    expect(r.code, r.out).toBe(0)
+    const ids = new Set(pooled())
+    for (const q of queried()) {
+      const present = [`${q}-aaaaa`, `${q}-bbbbb`].filter((id) => ids.has(id))
+      expect(
+        present.length === 0 || present.length === 2,
+        `bucket ${q} kept partial: ${present}`,
+      ).toBe(true)
+    }
+    const h = manifest().health
+    expect(h.gone).toBe(0)
+    expect(h.controlsLost).toBeGreaterThan(0)
+  })
+
+  // Boundaries of max(GONE_FLOOR, ceil(GONE_RATIO * found)), so `>` vs `>=` and each
+  // term are pinned.
+  it('treats exactly the floor of 3 still-missing as deletions', () => {
+    // 7 buckets x 6 = 42 found, so 2% rounds up to 1 and the floor of 3 governs.
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_PER_BUCKET: '6',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '3',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    expect(pooled()).toContain(`${first}-aaaaa`)
+    expect(manifest().health.gone).toBe(3)
+  })
+
+  it('lets the 2% term raise the budget above the floor on a large run', () => {
+    // 26 buckets x 6 = 156 found; 2% is 3.12, rounded up to 4, above the floor of 3.
+    const r = run({
+      HARVEST_UNITS: '3000',
+      STUB_PER_BUCKET: '6',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '4',
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(manifest().health.found).toBe(156)
+    const [first] = queried()
+    expect(pooled()).toContain(`${first}-aaaaa`)
+    expect(manifest().health.gone).toBe(4)
+  })
+
+  // With fewer controls than required there is no proof the confirming response was
+  // whole, so it must be treated as truncation rather than waved through as deletions.
+  it('treats a confirmation without enough controls as inconclusive', () => {
+    // One bucket of two; one member missing leaves a single id to use as a control.
+    const r = run({
+      HARVEST_UNITS: '500',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '1',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [only] = queried()
+    expect(pooled()).not.toContain(`${only}-aaaaa`)
+    expect(manifest().health.conclusive).toBe(false)
+  })
+
+  it('appends a video only once even if videos.list repeats it', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_DUP: '1' })
+    expect(r.code, r.out).toBe(0)
+    const ids = pooled()
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('never appends an id videos.list returned without being asked for', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_EXTRA: '1' })
+    expect(r.code, r.out).toBe(0)
+    expect(pooled()).not.toContain('zzzzzzzzzzz')
+    expect(pooled()).toHaveLength(queried().length * 2)
+  })
+
+  it('commits nothing when quota runs out on the confirming call', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_META_MISSING_ONCE: '2',
+      STUB_META_QUOTA_ON_CALL: '2',
+    })
+    expect(r.code, r.out).toBe(1)
+    expect(r.out).toMatch(/quota ran out while confirming/)
+    expect(manifest().health.status).toBe('quota-before-enrich')
+    expect(state().counter).toBe(0)
+    expect(pooled()).toEqual([])
+  })
+
+  it('reports non-public and too-fresh separately, and they sum to what was found', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_NONPUBLIC: '1' })
+    expect(r.code, r.out).toBe(0)
+    const h = manifest().health
+    expect(h.nonPublic).toBe(queried().length)
+    expect(
+      h.appended + h.nonPublic + h.heldBackFresh + h.inDroppedBuckets + h.gone,
+    ).toBe(h.found)
+    expect(r.out).toMatch(new RegExp(`${h.nonPublic} non-public`))
+  })
+
+  // The yield gate measures search, so a videos.list that silently returns nothing
+  // would append zero records every night under "ok".
+  it('alarms when enrichment keeps almost nothing, and commits nothing', () => {
+    const r = run({ HARVEST_UNITS: '2600', STUB_META_EMPTY: '1' })
+    expect(r.code, r.out).toBe(1)
+    expect(manifest().health.status).toBe('enrich-collapsed')
+    expect(state().counter).toBe(0)
+    expect(pooled()).toEqual([])
   })
 })
