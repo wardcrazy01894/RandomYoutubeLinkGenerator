@@ -264,6 +264,19 @@ in the repo changed.
    (`gh workflow run harvest.yml`); one successful manual run proves the workflow itself
    is healthy. Close the issue once the scheduled runs resume.
 
+A run that has sat **queued** for more than 2 hours also counts as dead. On 2026-10-10,
+after the owning account (wardcrazy01894) came back from a suspension, a dispatched harvest
+run stayed `queued` with zero jobs, and GitHub refused to start, cancel, force-cancel or
+delete it (409/403). It held the `harvest` concurrency group, so every later harvest run
+queued behind it — while other workflows ran fine. The way out was to rename the group in
+`harvest.yml` (it is now `harvest-v2`); if it happens again, rename it again. The stuck
+runs stay listed as `queued` (38070129144 and 38071185135 here) because they cannot be
+cancelled either. If GitHub ever releases one, it would run outside the new group and
+could overlap a `harvest-v2` run. That cannot corrupt the pool — the push to `pool` is a
+plain fast-forward, never `--force`, so the second run to finish is rejected and fails
+loudly — but expect one red run and its alarm issue if it happens. Scheduled
+runs stopping entirely while that account is suspended is expected: they run as it.
+
 The watchdog runs on the same scheduler, so a platform-wide outage silences it too. It
 reliably catches two missed nights, not always one (see the header of the workflow).
 
