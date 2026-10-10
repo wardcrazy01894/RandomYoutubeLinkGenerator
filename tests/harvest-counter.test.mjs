@@ -785,3 +785,37 @@ describe('re-harvest share', () => {
     expect(s.reharvestCursor).toBeGreaterThan(0)
   })
 })
+
+describe('baseline learning counts fresh buckets', () => {
+  // The baseline tracks the FRESH yield, so it must be learned from >= 20 fresh buckets,
+  // like the gate. Gating on all buckets let a run with re-harvest interleaved relearn
+  // from ~14 fresh ones.
+  it('does not relearn from a run with fewer than 20 fresh buckets', () => {
+    seed({ baselineYield: 5 })
+    writeFileSync(
+      join(pool, 'state.json'),
+      JSON.stringify({
+        counter: 400,
+        reharvestCursor: 0,
+        sweeps: 0,
+        totalBuckets: 400,
+      }),
+    )
+    const r = run({
+      HARVEST_UNITS: '2600',
+      STUB_PER_BUCKET: '1',
+      HARVEST_BASELINE_RESET: '1',
+    })
+    expect(r.code, r.out).toBe(0)
+    const h = manifest().health
+    expect(
+      h.buckets,
+      'the run must clear the old all-buckets bar',
+    ).toBeGreaterThanOrEqual(20)
+    expect(h.freshAttempted).toBeLessThan(20)
+    expect(
+      h.baselineYield,
+      'must not be relearned from too few fresh buckets',
+    ).toBe(5)
+  })
+})

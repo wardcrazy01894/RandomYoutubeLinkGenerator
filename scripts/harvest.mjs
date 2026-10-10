@@ -557,11 +557,13 @@ const servable = total
 // CLAUDE.md). Only a contiguous run of successfully queried fresh buckets counts; see
 // freshHole above.
 state.counter = Math.min(state.counter + freshAttempted, PREFIX_SPACE)
-// Same correction for the re-harvest cursor. The plan's fresh entries all precede the
-// re-harvest ones, so a break during the fresh section runs ZERO re-harvest buckets while
-// the cursor would still jump by the planned count, skipping those old buckets for a full
-// rotation. Reduce modulo the PRIOR counter, since the plan indices were built against it
-// and state.counter has already advanced on the line above.
+// Same correction for the re-harvest cursor: advance by what was ATTEMPTED, never by what
+// was planned. The plan interleaves fresh and re-harvest entries and the loop routinely
+// stops before its end, so only some of the planned re-harvest entries run; jumping the
+// cursor by the planned count would skip the rest for a full rotation. Re-harvest entries
+// keep cursor order within the plan, so the attempted ones are a prefix of them (bar
+// failures, which simply come back next rotation). Reduce modulo the PRIOR counter, since
+// the plan indices were built against it and state.counter has already advanced above.
 state.reharvestCursor =
   priorCounter > 0
     ? (state.reharvestCursor + reharvestAttempted) % priorCounter
@@ -610,7 +612,7 @@ function runShape() {
 
 /**
  * Merge two lists, preserving each one's order, so that every prefix of the result holds
- * them in (as nearly as possible) the same ratio as the whole. Fresh goes first on ties.
+ * them in the same ratio as the whole, to within one entry. Fresh goes first on ties.
  */
 function interleave(a, b) {
   const out = []
@@ -653,7 +655,9 @@ function recordHealth(status, buckets, y, extra = {}) {
   // 'ok' rather than via failure.
   const healthy =
     (status === 'ok' || status === 'ok-quota-capped') && !freshHole
-  const canLearn = healthy && y != null && buckets >= 20
+  // Gated on FRESH buckets, like the yield gate: `y` is the fresh-only yield, and with
+  // re-harvest interleaved a 20-bucket run holds only ~14 fresh ones.
+  const canLearn = healthy && y != null && freshAttempted >= 20
   if (BASELINE_RESET && !canLearn) {
     console.warn(
       `HARVEST_BASELINE_RESET was set, but this run cannot relearn a baseline ` +

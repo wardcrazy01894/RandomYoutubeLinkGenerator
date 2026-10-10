@@ -116,7 +116,8 @@ Ordered by how much they should worry you.
    bounded but not small. Until October 2026 the bound was much weaker than designed:
    fresh buckets ran first and used up the budget, leaving re-harvest 0–4 of its 26
    planned buckets a night. The plan now interleaves the two, so re-harvest gets its
-   share. Videos harvested before that fix are the ones most affected.
+   share. Most affected: videos uploaded after their bucket was drawn, in buckets drawn
+   before that fix — they wait for a re-harvest that had been all but stalled.
 7. **Safety filtering (on by default).** The default view hides age-restricted and
    non-embeddable videos; the footer toggle turns both off. Three exclusions are **not**
    covered by the toggle and

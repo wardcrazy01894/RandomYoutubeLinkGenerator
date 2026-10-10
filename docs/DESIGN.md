@@ -248,14 +248,16 @@ CAPTCHA handling, we stop. That converts "documented API use" into evasion.
 
 Daily budget against 10,000 units, at the measured k=5 rate of ~5 videos/bucket:
 
-| Call                               | Unit cost  | Per day   | Units |
-| ---------------------------------- | ---------- | --------- | ----- |
-| `search.list` (new buckets)        | 100        | ~44       | 6,200 |
-| `search.list` (rolling re-harvest) | 100        | ~19       | 2,700 |
-| `videos.list` enrichment           | 1 / 50 IDs | ~10 calls | 10    |
-| Re-validation sweep (§5.3)         | 1 / 50 IDs | 25,000    | 500   |
-| Reserve                            |            |           | ~590  |
+| Call                                                     | Unit cost  | Per day   | Units  |
+| -------------------------------------------------------- | ---------- | --------- | ------ |
+| `search.list` (new buckets, first page)                  | 100        | ~44       | ~4,400 |
+| `search.list` (re-harvest, first page)                   | 100        | ~19       | ~1,900 |
+| `search.list` (extra pages, mostly the ~13% unexhausted) | 100        | ~25       | ~2,500 |
+| `videos.list` enrichment                                 | 1 / 50 IDs | ~10 calls | 10     |
+| Re-validation sweep (§5.3)                               | 1 / 50 IDs | 25,000    | 500    |
+| Reserve                                                  |            |           | ~590   |
 
+The search rows roughly add up to the 8,900 units the harvest gets after its 100-unit canary.
 The plan sizes buckets at one search (62 fresh + 27 re-harvest = 89), but ~13% of buckets
 are unexhausted and cost three, so ~60–67 actually run: ~44 fresh and ~19 re-harvest,
 interleaved. At ~5 members per exhausted fresh bucket that is **~200 new videos/night**,
