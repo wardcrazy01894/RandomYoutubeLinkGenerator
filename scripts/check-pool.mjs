@@ -116,7 +116,11 @@ if (manifest.servable !== manifest.total)
 
 // The client shape-checks these and degrades to an EMPTY exclusion list on bad input, so
 // a malformed file does not break the site — it silently un-blocks or resurrects videos.
-// Catch it here instead, where it fails a PR.
+// Catch it here instead, where it fails a PR. Every id must also be IN the pool: the
+// client's headline count subtracts these lists from servable, so a typo'd or
+// never-harvested id would undercount it (and could disable the draw on a tiny pool).
+// `ids` is the set the shard loop above already built, so a malformed shard is reported
+// there rather than crashing here.
 for (const [name, list] of [
   ['blocklist.json', readBlocklist()],
   ['tombstones.json', readTombstones()],
@@ -128,6 +132,7 @@ for (const [name, list] of [
   for (const id of list.ids) {
     if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(id))
       fail(`${name}: invalid video id ${JSON.stringify(id)}`)
+    else if (!ids.has(id)) fail(`${name}: id ${id} is not in the pool`)
   }
 }
 

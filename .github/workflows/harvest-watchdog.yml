@@ -70,7 +70,7 @@ jobs:
             const body = [
               latest
                 ? `No harvest run has started its job in ${ageHours.toFixed(0)} hours (newest that did: ${latest.html_url}, created ${latest.created_at}).`
-                : `None of the last 20 harvest.yml runs on main reached its job.`,
+                : `None of the last 20 harvest.yml runs on main reached its job (each was startup_failure, cancelled, timed_out, skipped, or stale).`,
               ``,
               `A run that never starts files no failure issue of its own, which is why this`,
               `watchdog exists. Check that the workflow is still enabled`,

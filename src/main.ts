@@ -21,7 +21,7 @@ const DEAD_KEY = 'ryl.dead.v1'
 // harvester is alive — that is harvest-watchdog.yml's job. At 3 days this fired
 // between every pair of promotions and told viewers a healthy harvester was broken.
 const STALE_AFTER_DAYS = 14
-const PERMANENT_PLAYER_ERRORS = new Set([2, 100, 101, 150])
+const PERMANENT_PLAYER_ERRORS = new Set([100, 101, 150])
 // Validated once rather than encoded. encodeURIComponent would turn '@' into '%40',
 // which RFC 6068 does not permit in the addr-spec (the '@' must be literal; a
 // pct-encoded local-part like '%2B' for '+' is fine, so plus-aliases survive either
@@ -197,10 +197,12 @@ async function play(): Promise<void> {
       onStateChange: (e: { data: number }) => {
         if (e.data === YT.PlayerState.PLAYING) autoAdvances = 0
       },
-      // Every error advances, but only the PERMANENT codes hide the video for this viewer:
-      // 2 = invalid id, 100 = removed or private, 101/150 = embedding disallowed. Code 5
-      // (an HTML5 player error) and anything unknown can be transient — hiding on those
-      // took a video out of this viewer's draws for good after one network blip.
+      // Every error advances, but only the codes that are about the VIDEO hide it for this
+      // viewer: 100 = removed or private, 101/150 = embedding disallowed. Code 5 (an HTML5
+      // player error) and anything unknown can be transient — hiding on those took a video
+      // out of this viewer's draws for good after one network blip. Code 2 ("invalid
+      // parameter") is excluded too: every id is shape-checked by check-pool, so a 2 most
+      // likely means a player-config bug, which would otherwise hide good videos en masse.
       onError: async (e: { data: number }) => {
         if (PERMANENT_PLAYER_ERRORS.has(e.data)) markDead(record.id)
         if (autoAdvances >= MAX_AUTO_ADVANCE) {
