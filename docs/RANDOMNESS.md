@@ -87,10 +87,11 @@ Ordered by how much they should worry you.
    happen to start with it.
    Enrichment applies the same rule. When `videos.list` omits ids that search just
    returned, a second call is made for them. If it brings any back, or if many are still
-   missing, the responses are truncating — and a truncated response is a relevance-ranked
+   missing, or if any of the three already-confirmed control ids sent along with it fails
+   to come back, the responses are truncating — and a truncated response is a relevance-ranked
    partial bucket — so every affected bucket is dropped whole. If it brings none back and
    only a handful remain (at most 3, or 2% of the night's finds), they are treated as
-   videos deleted or made private in the minutes between the calls, and only those ids are
+   videos that are gone from YouTube — deleted, made private, or a stale search-index entry — and only those ids are
    dropped: they are outside the frame, and dropping their bucket-mates would not be.
    A dropped bucket returns only when the re-harvest rotation reaches it again, which at
    ~26 re-harvest buckets a night over ~3,000 drawn is roughly four months and grows with

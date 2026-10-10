@@ -48,6 +48,11 @@ const goneAt = Number(process.env.STUB_META_GONE_AT ?? 0)
 const goneCount = Number(process.env.STUB_META_GONE_COUNT ?? Infinity)
 const metaQuotaOnCall = Number(process.env.STUB_META_QUOTA_ON_CALL ?? 0)
 const metaExtra = process.env.STUB_META_EXTRA === '1'
+// Every call loses its last N items, and an id once lost STAYS lost — a truncation that
+// hits the same ids on the confirming call as on the first.
+const tailDrop = Number(process.env.STUB_META_TAIL_DROP ?? 0)
+const tailLost = new Set()
+const metaDup = process.env.STUB_META_DUP === '1'
 const missingOnce = Number(process.env.STUB_META_MISSING_ONCE ?? 0)
 const metaEmpty = process.env.STUB_META_EMPTY === '1'
 const nonPublic = process.env.STUB_META_NONPUBLIC === '1'
@@ -102,6 +107,12 @@ export async function videosMeta(key, ids) {
   }
   // Truncated FIRST response only (the 2026-10-01 shape); a second call returns them.
   if (missingOnce && metaCalls === 1) served = served.slice(0, served.length - missingOnce)
+  if (tailDrop) {
+    served = served.filter((id) => !tailLost.has(id))
+    for (const id of served.slice(Math.max(0, served.length - tailDrop))) tailLost.add(id)
+    served = served.slice(0, Math.max(0, served.length - tailDrop))
+  }
+  if (metaDup && served.length > 0) served = [served[0], ...served]
   if (metaExtra) served = [...served, 'zzzzzzzzzzz']
   return served.map((id) => ({
     id, title: 't', publishedAt: '2020-01-01T00:00:00Z',
@@ -596,6 +607,75 @@ describe('what enters the pool', () => {
     expect(ids).not.toContain(`${first}-aaaaa`)
     expect(ids).not.toContain(`${first}-bbbbb`)
     expect(manifest().health.bucketsDroppedUnconfirmed).toBe(1)
+  })
+
+  // The slip the controls close: a truncation that drops the TAIL of every request loses
+  // the same ids on both calls, revives nothing, and stays under the deletion budget — so
+  // without controls it passed as deletions and kept the rest of the bucket.
+  it('catches a truncation that drops the same tail on both calls', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_TAIL_DROP: '1' })
+    expect(r.code, r.out).toBe(0)
+    const last = queried().at(-1)
+    expect(pooled(), 'a partial bucket must never be kept').not.toContain(
+      `${last}-aaaaa`,
+    )
+    const h = manifest().health
+    expect(h.gone).toBe(0)
+    expect(h.bucketsDroppedUnconfirmed).toBe(1)
+    expect(h.controlsLost).toBeGreaterThan(0)
+  })
+
+  // Boundaries of max(GONE_FLOOR, ceil(GONE_RATIO * found)), so `>` vs `>=` and each
+  // term are pinned.
+  it('treats exactly the floor of 3 still-missing as deletions', () => {
+    // 7 buckets x 6 = 42 found, so 2% rounds up to 1 and the floor of 3 governs.
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_PER_BUCKET: '6',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '3',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    expect(pooled()).toContain(`${first}-aaaaa`)
+    expect(manifest().health.gone).toBe(3)
+  })
+
+  it('lets the 2% term raise the budget above the floor on a large run', () => {
+    // 26 buckets x 6 = 156 found; 2% is 3.12, rounded up to 4, above the floor of 3.
+    const r = run({
+      HARVEST_UNITS: '3000',
+      STUB_PER_BUCKET: '6',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '4',
+    })
+    expect(r.code, r.out).toBe(0)
+    expect(manifest().health.found).toBe(156)
+    const [first] = queried()
+    expect(pooled()).toContain(`${first}-aaaaa`)
+    expect(manifest().health.gone).toBe(4)
+  })
+
+  // With fewer controls than required there is no proof the confirming response was
+  // whole, so it must be treated as truncation rather than waved through as deletions.
+  it('treats a confirmation without enough controls as inconclusive', () => {
+    // One bucket of two; one member missing leaves a single id to use as a control.
+    const r = run({
+      HARVEST_UNITS: '500',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '1',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [only] = queried()
+    expect(pooled()).not.toContain(`${only}-aaaaa`)
+    expect(manifest().health.conclusive).toBe(false)
+  })
+
+  it('appends a video only once even if videos.list repeats it', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_DUP: '1' })
+    expect(r.code, r.out).toBe(0)
+    const ids = pooled()
+    expect(new Set(ids).size).toBe(ids.length)
   })
 
   it('never appends an id videos.list returned without being asked for', () => {

@@ -59,6 +59,8 @@ const YIELD_FLOOR_RATIO = 0.5 // run-level yield below half baseline is fatal
 // per batch; deletions between a search and a videos.list call minutes later are rare.
 const GONE_FLOOR = 3
 const GONE_RATIO = 0.02
+// Already-returned ids sent along with the confirming call; see enrichment.
+const CONTROL_COUNT = 3
 // Deliberately relearn the baseline instead of being measured against the stored one.
 // Must apply to BOTH the gate and recordHealth: applying it only to the latter would
 // leave the gate failing against the old baseline and exiting before writeState, so
@@ -329,18 +331,33 @@ if (found.size > 0) {
   // and every still-missing id is suspect. If it revives none and only a handful remain,
   // they are deletions. A large remainder is treated as truncation even with nothing
   // revived, since two truncated responses in a row is the likelier story.
+  //
+  // "Revives none" alone cannot prove the second response was whole: a truncation that
+  // drops the TAIL of every request loses the same ids twice, and they would pass as
+  // deletions — a relevance-ranked partial bucket. So the confirming call carries
+  // CONTROLS after the missing ids: ids the first call already returned, which must come
+  // back again. Any control absent means that response was truncated too. The request
+  // must also fit in one videos.list chunk, or the controls only vouch for the last one.
+  //
   // Ids the API returns that were never requested are discarded, so `found.get` below is
-  // always defined and nothing is appended without its bucket being checked.
-  meta = meta.filter((m) => found.has(m.id))
-  const got = new Set(meta.map((m) => m.id))
+  // always defined and nothing is appended without its bucket being checked. Duplicates
+  // are dropped as well: a repeated item would append the video twice and double its
+  // draw probability.
+  const byId = new Map()
+  for (const m of meta)
+    if (found.has(m.id) && !byId.has(m.id)) byId.set(m.id, m)
+  meta = [...byId.values()]
+  const got = new Set(byId.keys())
   const missing = [...found.keys()].filter((id) => !got.has(id))
   const droppedBuckets = new Set()
+  let enrichConfirm = {}
   let revived = 0
   let gone = 0
   if (missing.length > 0) {
+    const controls = [...got].slice(0, CONTROL_COUNT)
     let second
     try {
-      second = await enrich(missing)
+      second = await enrich([...missing, ...controls])
     } catch (err) {
       // Same reasoning as above, but by now nothing is ambiguous about the quota.
       if (err instanceof QuotaExceeded) {
@@ -357,6 +374,8 @@ if (found.size > 0) {
       }
       throw err
     }
+    const secondIds = new Set(second.map((m) => m.id))
+    const controlsLost = controls.filter((id) => !secondIds.has(id)).length
     for (const m of second) {
       if (got.has(m.id) || !found.has(m.id)) continue
       got.add(m.id)
@@ -368,7 +387,12 @@ if (found.size > 0) {
       GONE_FLOOR,
       Math.ceil(found.size * GONE_RATIO),
     )
-    const truncating = revived > 0 || stillMissing.length > deletionBudget
+    const conclusive =
+      controls.length === CONTROL_COUNT &&
+      controlsLost === 0 &&
+      missing.length + controls.length <= 50
+    const truncating =
+      !conclusive || revived > 0 || stillMissing.length > deletionBudget
     if (truncating) {
       for (const id of stillMissing) droppedBuckets.add(found.get(id))
     } else {
@@ -376,13 +400,16 @@ if (found.size > 0) {
     }
     console.warn(
       `${missing.length} found ids were missing from videos.list; ${revived} came back on a ` +
-        `second call. ` +
-        (truncating
-          ? `Responses look truncated: dropping ${droppedBuckets.size} buckets whole for the ` +
-            `${stillMissing.length} still missing.`
-          : `Treating the ${gone} still missing as deleted or private (at most ` +
-            `${deletionBudget} allowed) and dropping just those ids.`),
+        `second call (${controlsLost} of ${controls.length} controls lost). ` +
+        (stillMissing.length === 0
+          ? `Nothing is still missing.`
+          : truncating
+            ? `Responses look truncated: dropping ${droppedBuckets.size} buckets whole for the ` +
+              `${stillMissing.length} still missing.`
+            : `Treating the ${gone} still missing as gone from YouTube (at most ` +
+              `${deletionBudget} allowed) and dropping just those ids.`),
     )
+    enrichConfirm = { controlsLost, conclusive }
   }
   const inDroppedBucket = (id) => droppedBuckets.has(found.get(id))
 
@@ -412,9 +439,10 @@ if (found.size > 0) {
   // Every found id lands in exactly one of these, so they sum to found.size. The old
   // line reported meta.length - records.length as "non-public dropped", which lumped
   // too-fresh in with non-public and never counted ids missing from the response at all.
-  // Split by bucket kind for the enrichment gate's margin: re-harvest buckets turn up
-  // mostly recent uploads, which the upload-age quarantine holds back, so a run made
-  // mostly of re-harvest buckets keeps a smaller share for a legitimate reason.
+  // Split by bucket kind for monitoring only — the enrichment gate below uses the total.
+  // Re-harvest buckets turn up mostly recent uploads, which the upload-age quarantine
+  // holds back, so a run made mostly of re-harvest buckets keeps a smaller share for a
+  // legitimate reason; this split shows how close such a run comes to the gate.
   const isFreshId = (id) => freshBuckets.has(found.get(id))
   const foundFresh = [...found.keys()].filter(isFreshId).length
   const appendedFresh = records.filter((r) => isFreshId(r.id)).length
@@ -430,6 +458,7 @@ if (found.size > 0) {
     gone,
     bucketsDroppedUnconfirmed: droppedBuckets.size,
     revivedOnRetry: revived,
+    ...enrichConfirm,
   }
   console.log(
     `enriched ${found.size} found ids: ${records.length} appended, ${tooFresh} held back ` +

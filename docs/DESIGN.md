@@ -130,8 +130,10 @@ So the drop costs ~17% of yield without skewing what survives.
 
 The same whole-bucket rule applies at enrichment. Ids that search returned but
 `videos.list` omits get a confirming second call, as `revalidate.mjs` has done since the
-2026-10-01 truncation incident. If that call revives any, or more than max(3, 2%) of the
-found ids are still missing, responses are truncating and each affected bucket is dropped
+2026-10-01 truncation incident. It also carries three control ids the first call already
+returned, so a truncation that drops the same tail twice cannot pass for deletions. If
+that call revives any, loses a control, or leaves more than max(3, 2%) of the found ids
+missing, responses are truncating and each affected bucket is dropped
 whole (`manifest.health.bucketsDroppedUnconfirmed`); it returns on re-harvest. Otherwise
 the few still missing are taken as deleted or made private and dropped individually
 (`gone`), since dropping their bucket-mates for a re-harvest rotation would cost far more
