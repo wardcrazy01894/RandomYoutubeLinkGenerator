@@ -48,16 +48,20 @@ result uniform; taking part of one would not be.
 
 Two independent checks, both from the live pool:
 
-**Yield matches theory.** A 1.5 x 10^10 corpus predicts 5.50 videos per bucket. We measure
-~5.3. Implied recall ≈ 0.95 — the search index returns nearly every video we ask for, so
-we are not silently missing a large slice.
+**Yield matches theory.** A 1.5 x 10^10 corpus predicts 5.50 videos per bucket. Over 600
+exhausted buckets (11 nights, late September to early October 2026) we measure **5.33**.
+Implied recall ≈ 0.97 — the search index returns nearly every video we ask for, so we are
+not silently missing a large slice.
 
-**The view distribution matches published research.** Our pool has a median of ~59 views
-and ~4% never-watched videos. The independent 2023 study found ~41 and ~4%. A sampler
-skewed toward popular content could not produce those numbers — you would see medians in
-the thousands. This is the single most reassuring number here.
+**The view distribution looks like research, not like popularity.** On 2026-10-10 the pool
+(12,577 videos) has a median of **76 views**, and **2.9%** have never been watched. The
+independent 2023 study found ~41 and ~4%. Ours is not identical — our view counts are
+captured at harvest, and the pool skews recent (§4.6) — but a sampler skewed toward
+popular content would show medians in the thousands. This is still the most reassuring
+number here.
 
-Live figures are regenerated from the pool by `npm run pool-stats`.
+These figures come from `npm run pool-stats`, run by hand on the live pool and updated
+here in a PR; they are dated so you can tell how fresh they are.
 
 ## 4. Every bias we know about
 
@@ -72,14 +76,15 @@ Ordered by how much they should worry you.
 3. **ID-generation is assumed stable.** §2 assumes YouTube has assigned IDs randomly and
    consistently since 2005. That is folklore, not a published fact. If the scheme changed,
    dash position could correlate with upload era — and era correlates with almost
-   everything. We monitor the character distribution by upload year to detect it.
+   everything. The test that would detect it — character distribution by upload year — is
+   designed (DESIGN.md §3.3.1) but not yet built, so this remains an assumption.
 4. **Embeddability.** By default we serve only embeddable videos, which excludes most
    major-label music and many news organisations. The footer toggle lifts this along with
    age-restriction, so it is a default rather than a hard frame boundary — and the
    sweep deliberately does not tombstone non-embeddable videos, which would turn that
    default into a permanent removal. Currently ~99% of harvested videos qualify, so the
    effect is small but real.
-5. **Unexhaustible buckets (~17%).** When a prefix happens to look like ordinary text
+5. **Unexhaustible buckets (~13%).** When a prefix happens to look like ordinary text
    (`ilfat`), it collides with thousands of title matches and the bucket cannot be
    retrieved completely. We drop those buckets whole rather than take a truncated,
    relevance-ranked slice. **This does not bias the sample**: the drop depends only on
@@ -93,9 +98,9 @@ Ordered by how much they should worry you.
    only a handful remain (at most 3, or 2% of the night's finds), they are treated as
    videos that are gone from YouTube — deleted, made private, or a stale search-index entry — and only those ids are
    dropped: they are outside the frame, and dropping their bucket-mates would not be.
-   A dropped bucket returns only when the re-harvest rotation reaches it again, which at
-   ~26 re-harvest buckets a night over ~3,000 drawn is roughly four months and grows with
-   the pool. `manifest.health.bucketsDroppedUnconfirmed` and `gone` record each night's
+   A dropped bucket returns only when the re-harvest rotation reaches it again — in
+   practice a long wait, since re-harvest currently gets far less than its planned share
+   of each night (§4.6). `manifest.health.bucketsDroppedUnconfirmed` and `gone` record each night's
    counts, so the rate can be watched rather than assumed.
    The controls assume truncation keeps a contiguous run of the request in order, which
    is the shape observed. A response that drops items from the middle, reorders and
@@ -103,8 +108,11 @@ Ordered by how much they should worry you.
    capped at the deletion budget — at most max(3, 2%) ids a night — and is accepted rather
    than claimed away.
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
-   they did not exist for earlier draws. A rolling fraction of each night's budget
-   re-harvests older buckets to bound this.
+   they did not exist for earlier draws. 30% of each night's plan is meant to re-harvest
+   older buckets to bound this. **In practice it runs far less:** fresh buckets go first,
+   unexhausted ones cost up to three searches, and the budget is usually gone after ~60
+   buckets — so re-harvest has been getting 0–4 of its 26 planned buckets a night. Until
+   that is fixed, this bias is larger than designed.
 7. **Safety filtering (on by default).** The default view hides age-restricted and
    non-embeddable videos; the footer toggle turns both off. Three exclusions are **not**
    covered by the toggle and
@@ -117,9 +125,9 @@ Ordered by how much they should worry you.
 ## 5. What we deliberately do not claim
 
 - We do **not** claim to sample all of YouTube. See §4.1 and §4.2.
-- We do **not** publish a corpus-size estimate yet. The method can produce one, but it
-  needs ≥2,000 buckets before the confidence interval is narrow enough to mean anything,
-  and the estimator is partly circular with the assumption in §4.3.
+- We do **not** publish a corpus-size estimate. The method can produce one, and the pool
+  has now passed the 2,000 buckets we said it needed, but no confidence interval is
+  computed yet and the estimator is partly circular with the assumption in §4.3.
 - We do **not** claim the safety filter makes anything safe. It is a filter, not a
   guarantee. See §6.
 
@@ -133,7 +141,8 @@ That is the honest texture of the platform, and it is the point of the site. It 
 a uniform draw will sometimes surface ordinary people — often children — who never
 anticipated an audience. So the site never autoplays, defaults to excluding age-restricted
 material, holds newly uploaded videos back for 30 days while moderation catches up,
-re-validates the pool (manually today — automating that sweep is an open follow-up), and offers a control on every draw that hides a video for
-you — and opens a prefilled report to send, when a contact address is configured.
+re-validates a slice of the pool every night, and offers a control on every draw that
+hides a video for you — and opens a prefilled report to send, when a contact address is
+configured.
 
 None of that makes the pool "safe". It makes it _considered_.
