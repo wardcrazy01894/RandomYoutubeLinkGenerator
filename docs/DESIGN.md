@@ -128,6 +128,17 @@ collides with thousands of title and description matches. That is a property of 
 string_, not of the videos whose IDs begin with it — those are random with respect to it.
 So the drop costs ~17% of yield without skewing what survives.
 
+The same whole-bucket rule applies at enrichment. Ids that search returned but
+`videos.list` omits get a confirming second call, as `revalidate.mjs` has done since the
+2026-10-01 truncation incident. It also carries three control ids the first call already
+returned, so a truncation that drops the same tail twice cannot pass for deletions. If
+that call revives any, loses a control, or leaves more than max(3, 2%) of the found ids
+missing, responses are truncating and each affected bucket is dropped
+whole (`manifest.health.bucketsDroppedUnconfirmed`); it returns on re-harvest. Otherwise
+the few still missing are taken as deleted or made private and dropped individually
+(`gone`), since dropping their bucket-mates for a re-harvest rotation would cost far more
+than it protects. See RANDOMNESS.md ("Unexhaustible buckets").
+
 #### 3.3.4 Recall — measured, and it is high
 
 Revision 2 flagged this as the largest threat to the whole project. Web search returned
@@ -339,11 +350,19 @@ occupancy is a Poisson-like draw around ~5 crossed with case-folding multiplicit
 
 Fatal, run-level assertions in `harvest.mjs`:
 
-- **API error taxonomy** — `quotaExceeded` is expected and exits 0 cleanly; `keyInvalid`,
+- **API error taxonomy** — `quotaExceeded` exits 0 only when nothing was found yet,
+  otherwise fails as `quota-before-enrich` (below); `keyInvalid`,
   `accessNotConfigured`, and 403s are fatal and distinct.
 - **Yield gate** — run-level videos/bucket below half the rolling baseline exits non-zero.
-- **Exhaustion gate** — buckets that cannot be proven exhausted are dropped and counted;
-  above a threshold, fail.
+- **Exhaustion accounting** — buckets that cannot be proven exhausted are dropped and
+  counted in the log. There is no threshold that fails the run.
+- **Enrichment gate** — fewer than half of the found ids surviving enrichment exits
+  non-zero (`enrich-collapsed`). The yield gate measures search, so without this a
+  `videos.list` that silently returned nothing would append zero records under `ok`.
+- **Quota before enrichment** — Google's quota is project-wide, so running out mid-loop
+  also blocks `videos.list`. The run commits nothing, leaves the counter alone so the same
+  buckets are redrawn, and exits non-zero (`quota-before-enrich`): the local budget exists
+  so that this never happens, so reaching it means something else spent the quota.
 - **Mechanism canary** — a known dash-token ID must be retrievable by its own token every
   run. This is the single check that catches YouTube changing the tokenizer.
 

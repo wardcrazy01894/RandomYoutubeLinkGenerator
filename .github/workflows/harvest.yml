@@ -156,6 +156,7 @@ jobs:
       # 500 units covers 25,000 records, so a 100k pool is fully re-checked every ~4
       # nights. Non-fatal — a sweep failure must not discard a good harvest.
       - name: Re-validate a slice of the pool
+        id: revalidate
         continue-on-error: true
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -188,38 +189,62 @@ jobs:
             process.stdout.write('refused=' + refused + '\n')
           " >> "$GITHUB_OUTPUT"
 
-      - name: Report a refused sweep
-        if: steps.sweep.outputs.refused == 'true'
+      # A CRASHED sweep is reported here too. The sweep runs under continue-on-error, and
+      # harvest.mjs replaces manifest.stats wholesale, so after a crash there is no
+      # lastSweep to read and `refused` above is false: a sweep failing every night (a
+      # persistent 5xx, a code bug) was invisible. `outcome` is the result before
+      # continue-on-error is applied, so it still says failure.
+      - name: Report a refused or crashed sweep
+        if: steps.sweep.outputs.refused == 'true' || steps.revalidate.outcome == 'failure'
         continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CRASHED: ${{ steps.revalidate.outcome == 'failure' }}
         with:
           script: |
-            const body = [
-              `Re-validation **refused** some or all of this window's findings: a batch, or`,
-              `the whole window, would have lost more than the mass-removal guard allows,`,
-              `which is far more likely to be a bad API response than reality.`,
-              ``,
-              `Nothing was tombstoned for the refused part, and the cursor still advanced — the`,
-              `sweep is NOT wedged, and the window is re-examined on the next full pass.`,
-              `One of these is routine. Several nights running is not: check whether`,
-              `videos.list is returning empty items for valid ids.`,
-              ``,
-              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            ].join('\n')
-            const existing = await github.rest.issues.listForRepo({
+            const run = `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            const crashed = process.env.CRASHED === 'true'
+            const title = crashed
+              ? 'Harvester health: re-validation sweep crashed'
+              : 'Harvester health: re-validation refused a window'
+            const body = (crashed
+              ? [
+                  `The re-validation sweep **exited with an error**. The harvest itself was not`,
+                  `affected and is still published, but nothing was re-checked tonight. The step's`,
+                  `log has the error. If it repeats, deleted and private videos stop being`,
+                  `tombstoned and keep being served.`,
+                  ``,
+                  run,
+                ]
+              : [
+                  `Re-validation **refused** some or all of this window's findings: a batch, or`,
+                  `the whole window, would have lost more than the mass-removal guard allows,`,
+                  `which is far more likely to be a bad API response than reality.`,
+                  ``,
+                  `Nothing was tombstoned for the refused part, and the cursor still advanced — the`,
+                  `sweep is NOT wedged, and the window is re-examined on the next full pass.`,
+                  `One of these is routine. Several nights running is not: check whether`,
+                  `videos.list is returning empty items for valid ids.`,
+                  ``,
+                  run,
+                ]).join('\n')
+            // Matched on title, not "whichever harvester-health issue is open": a routine
+            // refused-window issue is often left open, and other alarms buried as comments
+            // under it were easy to miss.
+            const open = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,
               state: 'open', labels: 'harvester-health',
             })
-            if (existing.data.length > 0) {
+            const mine = open.data.find((i) => i.title === title)
+            if (mine) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: existing.data[0].number, body,
+                issue_number: mine.number, body,
               })
             } else {
               await github.rest.issues.create({
                 owner: context.repo.owner, repo: context.repo.repo,
-                title: 'Harvester health: re-validation refused a window',
-                body, labels: ['harvester-health'],
+                title, body, labels: ['harvester-health'],
               })
             }
 
@@ -306,18 +331,22 @@ jobs:
               `Triage: docs/OPERATIONS.md — the usual causes are a broken canary`,
               `(YouTube changed ID tokenization), a frozen sampling frontier`,
               `(no-fresh-progress), an invalid/restricted API key, a collapsed yield,`,
+              `enrichment keeping under half of what search found (enrich-collapsed),`,
+              `Google's quota running out before enrichment (quota-before-enrich),`,
               `a dispatched \`units\` below 500 (too small to start a single bucket),`,
               `or a GitHub 5xx on the final push to \`pool\` (the harvest itself succeeded`,
               `and nothing is corrupted; the next scheduled run redraws the same prefixes).`,
             ].join('\n')
-            const existing = await github.rest.issues.listForRepo({
+            // Matched on title; see the sweep report above.
+            const open = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,
               state: 'open', labels: 'harvester-health',
             })
-            if (existing.data.length > 0) {
+            const mine = open.data.find((i) => i.title === title)
+            if (mine) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: existing.data[0].number, body,
+                issue_number: mine.number, body,
               })
             } else {
               await github.rest.issues.create({

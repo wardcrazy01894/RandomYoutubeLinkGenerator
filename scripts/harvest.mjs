@@ -12,6 +12,7 @@ import {
   searchPage,
   videosMeta,
   COST,
+  VIDEOS_CHUNK,
   QuotaExceeded,
   ApiKeyError,
   sleep,
@@ -54,6 +55,13 @@ const MIN_UPLOAD_AGE_DAYS = 30
 const PACING_MS = envNum(process.env.HARVEST_PACING_MS, 350) // per-minute rate limit
 const MAX_PAGES = 3 // a k=5 bucket needing >150 results is anomalous; drop it
 const YIELD_FLOOR_RATIO = 0.5 // run-level yield below half baseline is fatal
+// How many ids missing from videos.list on BOTH calls are believed to be real deletions
+// rather than truncation: max(GONE_FLOOR, GONE_RATIO of found). Truncation loses dozens
+// per batch; deletions between a search and a videos.list call minutes later are rare.
+const GONE_FLOOR = 3
+const GONE_RATIO = 0.02
+// Already-returned ids sent along with the confirming call; see enrichment.
+const CONTROL_COUNT = 3
 // Deliberately relearn the baseline instead of being measured against the stored one.
 // Must apply to BOTH the gate and recordHealth: applying it only to the latter would
 // leave the gate failing against the old baseline and exiting before writeState, so
@@ -100,6 +108,8 @@ let reharvestAttempted = 0
 // while a later one gets queried twice.
 let freshHole = false
 let freshNew = 0
+// What enrichment did with what search found. Declared here for the same TDZ reason.
+let enrichShape = {}
 
 // The loop refuses to START a bucket without MAX_PAGES+1 searches in reserve, so that a
 // bucket it begins can always be paged to exhaustion — a partial bucket is truncated in
@@ -180,6 +190,7 @@ console.log(
 
 // --- harvest ----------------------------------------------------------------
 const found = new Map()
+const freshBuckets = new Set()
 const priorCounter = state.counter
 let bucketsDone = 0
 let unexhausted = 0
@@ -200,8 +211,10 @@ for (const { n, fresh } of plan) {
     const { ids, exhausted } = await harvestBucket(q)
     bucketsDone++
     // Count the prefix consumed only once the query actually came back. Counting
-    // before the try burned prefixes on every throw — and because HARVEST_UNITS sits
-    // just under the daily quota, a QuotaExceeded throw is the NORMAL way a run ends.
+    // before the try burned prefixes on every throw, a QuotaExceeded included. (A healthy
+    // run ends on the local HARVEST_UNITS budget, which sits under Google's quota, so
+    // QuotaExceeded means something else spent the quota — and it then also blocks
+    // enrichment; see there.)
     // An unexhausted bucket still counts: it was queried and deliberately rejected,
     // so retrying it forever would stall the counter behind one bad prefix.
     if (fresh) {
@@ -220,6 +233,7 @@ for (const { n, fresh } of plan) {
     for (const id of ids) {
       if (existingIds.has(id) || found.has(id)) continue
       found.set(id, q)
+      if (fresh) freshBuckets.add(q)
       // Counted separately: the baseline and the gate must measure FRESH buckets only.
       // Mixing in re-harvest buckets — which legitimately return nothing new — diluted
       // the number being compared against a fresh-derived threshold.
@@ -255,6 +269,12 @@ async function harvestBucket(q) {
   return { ids, exhausted: false }
 }
 
+async function enrich(ids) {
+  const meta = await videosMeta(key, ids)
+  spend(Math.ceil(ids.length / 50) * COST.videos)
+  return meta
+}
+
 const yieldPer = bucketsDone > 0 ? found.size / bucketsDone : 0
 // What the baseline tracks and the gate compares: new videos per FRESH bucket. null when
 // no fresh bucket completed — a distinct condition from "zero yield", alarmed separately.
@@ -266,15 +286,152 @@ if (unexhausted > 0)
   console.warn(`${unexhausted} buckets dropped as unexhausted`)
 
 // --- enrich -----------------------------------------------------------------
+// Mandatory whenever search found anything. This used to be skipped when the local
+// budget read zero, which discarded every found id while the counter still advanced
+// past their buckets. The local budget is advisory (the real cap is Google's), and the
+// loop's reserve leaves at least one page's worth for this anyway.
 let records = []
-if (found.size > 0 && remaining() > 0) {
-  const meta = await videosMeta(key, [...found.keys()])
-  spend(Math.ceil(found.size / 50) * COST.videos)
+if (found.size > 0) {
+  let meta
+  try {
+    meta = await enrich([...found.keys()])
+  } catch (err) {
+    // Quota is project-wide, so after a QuotaExceeded in the loop this call cannot
+    // succeed either; it used to escape here as an unhandled stack trace. Nothing can be
+    // committed without metadata, so commit nothing and leave state alone: the same
+    // prefixes are drawn again next run, at the cost of re-spending their searches.
+    // Fatal rather than quiet, because the 9000-unit local budget exists precisely so
+    // Google's quota is never reached — reaching it means something else is spending
+    // it, and a nightly repeat would freeze the frontier with nobody told.
+    if (err instanceof QuotaExceeded) {
+      console.error(
+        `FATAL: quota ran out before ${found.size} found ids could be enriched. ` +
+          `Nothing committed; the counter is unchanged and the same buckets are redrawn next run.`,
+      )
+      recordHealth('quota-before-enrich', bucketsDone, null, runShape())
+      process.exit(1)
+    }
+    if (err instanceof ApiKeyError) {
+      console.error(`FATAL: ${err.message}`)
+      process.exit(1)
+    }
+    throw err
+  }
+
+  // Search returned these ids moments ago, so videos.list omitting one is either a
+  // truncated response — the 2026-10-01 shape: HTTP 200 with 1–4 of 50 items — or a
+  // video deleted or made private in between. The two need OPPOSITE handling:
+  //   - Truncation keeps a prefix of a batch, and `found` is in bucket-then-relevance
+  //     order, so what survives is a relevance-ranked partial bucket (§3.3.3). Those
+  //     buckets must be dropped whole.
+  //   - A genuinely gone video is simply outside the frame. Dropping just that id is
+  //     correct, and dropping its bucket would keep the siblings out for a whole
+  //     re-harvest rotation — or forever, if search keeps returning the dead id.
+  // They cannot be told apart per id, so this tells them apart per RUN, as revalidate.mjs
+  // does: a second call for the missing ids. If it revives any, responses are truncating
+  // and every still-missing id is suspect. If it revives none and only a handful remain,
+  // they are deletions. A large remainder is treated as truncation even with nothing
+  // revived, since two truncated responses in a row is the likelier story.
+  //
+  // "Revives none" alone cannot prove the second response was whole: a truncation that
+  // drops the same end of every request loses the same ids twice, and they would pass as
+  // deletions — a relevance-ranked partial bucket. So the confirming call carries
+  // CONTROLS at both ends of the request: ids the first call already returned, which must
+  // come back again. Any control absent means that response was truncated too. The
+  // request must also fit in one videos.list chunk, or the controls only vouch for one.
+  //
+  // What the controls do NOT catch, accepted as residual and stated in RANDOMNESS.md: a
+  // response that loses items from the MIDDLE, or returns items out of request order and
+  // loses some, or omits particular ids on every call (a backend shard down). The
+  // observed 2026-10-01 shape kept a contiguous prefix in order, which this does catch;
+  // any of the others can pass at most max(GONE_FLOOR, GONE_RATIO) ids a night as gone.
+  //
+  // Ids the API returns that were never requested are discarded, so `found.get` below is
+  // always defined and nothing is appended without its bucket being checked. Duplicates
+  // are dropped as well: a repeated item would append the video twice and double its
+  // draw probability.
+  const byId = new Map()
+  for (const m of meta)
+    if (found.has(m.id) && !byId.has(m.id)) byId.set(m.id, m)
+  meta = [...byId.values()]
+  const got = new Set(byId.keys())
+  const missing = [...found.keys()].filter((id) => !got.has(id))
+  const droppedBuckets = new Set()
+  // Always present, so monitoring reads a stable shape: null when nothing was missing.
+  let enrichConfirm = { controlsLost: null, conclusive: null }
+  let revived = 0
+  let gone = 0
+  if (missing.length > 0) {
+    const controls = [...got].slice(0, CONTROL_COUNT)
+    let second
+    try {
+      // One control first, the rest last, so truncation from either end of the
+      // request loses a control before it can lose the missing ids twice.
+      second = await enrich(
+        [controls[0], ...missing, ...controls.slice(1)].filter(Boolean),
+      )
+    } catch (err) {
+      // Same reasoning as above, but by now nothing is ambiguous about the quota.
+      if (err instanceof QuotaExceeded) {
+        console.error(
+          `FATAL: quota ran out while confirming ${missing.length} ids missing from videos.list. ` +
+            `Nothing committed; the counter is unchanged.`,
+        )
+        recordHealth('quota-before-enrich', bucketsDone, null, runShape())
+        process.exit(1)
+      }
+      if (err instanceof ApiKeyError) {
+        console.error(`FATAL: ${err.message}`)
+        process.exit(1)
+      }
+      throw err
+    }
+    const secondIds = new Set(second.map((m) => m.id))
+    const controlsLost = controls.filter((id) => !secondIds.has(id)).length
+    for (const m of second) {
+      if (got.has(m.id) || !found.has(m.id)) continue
+      got.add(m.id)
+      meta.push(m)
+      revived++
+    }
+    const stillMissing = missing.filter((id) => !got.has(id))
+    const deletionBudget = Math.max(
+      GONE_FLOOR,
+      Math.ceil(found.size * GONE_RATIO),
+    )
+    const conclusive =
+      controls.length === CONTROL_COUNT &&
+      controlsLost === 0 &&
+      missing.length + controls.length <= VIDEOS_CHUNK
+    const truncating =
+      !conclusive || revived > 0 || stillMissing.length > deletionBudget
+    if (truncating) {
+      for (const id of stillMissing) droppedBuckets.add(found.get(id))
+    } else {
+      gone = stillMissing.length
+    }
+    console.warn(
+      `${missing.length} found ids were missing from videos.list; ${revived} came back on a ` +
+        `second call (${controlsLost} of ${controls.length} controls lost). ` +
+        (stillMissing.length === 0
+          ? `Nothing is still missing.`
+          : truncating
+            ? `Responses look truncated: dropping ${droppedBuckets.size} buckets whole for the ` +
+              `${stillMissing.length} still missing.`
+            : `Treating the ${gone} still missing as gone from YouTube (at most ` +
+              `${deletionBudget} allowed) and dropping just those ids.`),
+    )
+    enrichConfirm = { controlsLost, conclusive }
+  }
+  const inDroppedBucket = (id) => droppedBuckets.has(found.get(id))
+
   const stamp = runStarted.toISOString()
   const uploadCutoff = runStarted.getTime() - MIN_UPLOAD_AGE_DAYS * 86400_000
   const isSeasoned = (m) =>
     m.publishedAt && new Date(m.publishedAt).getTime() < uploadCutoff
-  const publicMeta = meta.filter((m) => m.privacyStatus === 'public')
+  const kept = meta.filter((m) => !inDroppedBucket(m.id))
+  const publicMeta = kept.filter((m) => m.privacyStatus === 'public')
+  const nonPublic = kept.length - publicMeta.length
   const tooFresh = publicMeta.filter((m) => !isSeasoned(m)).length
   if (tooFresh > 0)
     console.log(
@@ -291,9 +448,53 @@ if (found.size > 0 && remaining() > 0) {
     mfk: m.madeForKids,
     h: stamp,
   }))
+  // Every found id lands in exactly one of these, so they sum to found.size. The old
+  // line reported meta.length - records.length as "non-public dropped", which lumped
+  // too-fresh in with non-public and never counted ids missing from the response at all.
+  // Split by bucket kind for monitoring only — the enrichment gate below uses the total.
+  // Re-harvest buckets turn up mostly recent uploads, which the upload-age quarantine
+  // holds back, so a run made mostly of re-harvest buckets keeps a smaller share for a
+  // legitimate reason; this split shows how close such a run comes to the gate.
+  const isFreshId = (id) => freshBuckets.has(found.get(id))
+  const foundFresh = [...found.keys()].filter(isFreshId).length
+  const appendedFresh = records.filter((r) => isFreshId(r.id)).length
+  enrichShape = {
+    found: found.size,
+    foundFresh,
+    appendedFresh,
+    appended: records.length,
+    heldBackFresh: tooFresh,
+    nonPublic,
+    inDroppedBuckets: [...found.values()].filter((q) => droppedBuckets.has(q))
+      .length,
+    gone,
+    bucketsDroppedUnconfirmed: droppedBuckets.size,
+    revivedOnRetry: revived,
+    ...enrichConfirm,
+  }
   console.log(
-    `enriched ${records.length} public videos (${meta.length - records.length} non-public dropped)`,
+    `enriched ${found.size} found ids: ${records.length} appended, ${tooFresh} held back ` +
+      `as too fresh, ${nonPublic} non-public, ${gone} gone, ` +
+      `${enrichShape.inDroppedBuckets} in ${droppedBuckets.size} dropped buckets ` +
+      `(kept ${pctOf(appendedFresh, foundFresh)}% from fresh buckets, ` +
+      `${pctOf(records.length - appendedFresh, found.size - foundFresh)}% from re-harvest)`,
   )
+}
+
+// Enrichment gate. The yield gate below measures SEARCH, before enrichment, so if
+// videos.list started returning empty items or changed the shape of privacyStatus or
+// publishedAt, every night would append nothing while health still said "ok". Normally
+// only the too-fresh and the rare non-public are lost here, so a run that keeps less
+// than half of what it found is broken, not unlucky. Exits before writeState, so the same
+// buckets are redrawn once it is fixed.
+const ENRICH_FLOOR_RATIO = 0.5
+if (found.size >= 20 && records.length < found.size * ENRICH_FLOOR_RATIO) {
+  console.error(
+    `FATAL: enrichment kept ${records.length} of ${found.size} found ids, below ` +
+      `${ENRICH_FLOOR_RATIO * 100}%. Check what videos.list is returning.`,
+  )
+  recordHealth('enrich-collapsed', bucketsDone, freshYield, runShape())
+  process.exit(1)
 }
 
 // --- validity gates ---------------------------------------------------------
@@ -395,7 +596,12 @@ function runShape() {
     // Overall yield across fresh AND re-harvest buckets, for diagnosis only. The
     // baseline deliberately tracks the fresh-only number.
     yieldAll: yieldPer,
+    ...enrichShape,
   }
+}
+
+function pctOf(n, d) {
+  return d > 0 ? Math.round((n / d) * 1000) / 10 : null
 }
 
 function pct(rows, pred) {

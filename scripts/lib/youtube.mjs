@@ -8,13 +8,16 @@ const API = 'https://www.googleapis.com/youtube/v3'
 
 /** Unit costs, from the published quota table. */
 export const COST = { search: 100, videos: 1 }
+/** videos.list accepts at most this many ids per request. */
+export const VIDEOS_CHUNK = 50
 
 export class QuotaExceeded extends Error {}
 export class ApiKeyError extends Error {}
 
 /**
  * Errors are split into three classes because they need opposite handling:
- *   - quotaExceeded  -> expected daily; the run stops cleanly and exits 0
+ *   - quotaExceeded  -> the day's quota is gone; the caller decides (harvest.mjs exits 0
+ *                       only if nothing was found yet, and fails otherwise)
  *   - key/access     -> fatal misconfiguration; must page a human
  *   - everything else-> transient; retried with backoff
  */
@@ -31,7 +34,12 @@ async function call(endpoint, params, key, { retries = 5 } = {}) {
     try {
       res = await fetch(url, { headers: { accept: 'application/json' } })
     } catch (err) {
-      lastErr = err
+      // undici reports every transport failure as a bare "fetch failed"; the useful part
+      // (ECONNRESET, ENOTFOUND, a TLS error) is on err.cause, and was being dropped.
+      const cause = err.cause?.code ?? err.cause?.message
+      lastErr = new Error(
+        `${endpoint} network error: ${err.message}${cause ? ` (${cause})` : ''}`,
+      )
       await sleep(500 * 2 ** attempt)
       continue
     }
@@ -56,7 +64,12 @@ async function call(endpoint, params, key, { retries = 5 } = {}) {
     if (res.status === 429 || res.status >= 500) {
       // 429 here is the per-minute rate limit, NOT the daily quota (that arrives as
       // quotaExceeded above). Backing off generously is correct and cheap.
-      lastErr = new Error(`${res.status} ${reason ?? ''}`)
+      // Endpoint and body kept: the bare "503 " this used to produce reached the harvest
+      // log as "bucket X failed: 503 " with nothing to diagnose. The body never contains
+      // the key — only the URL does, and the URL is deliberately not logged.
+      lastErr = new Error(
+        `${endpoint} failed: ${res.status} ${reason ?? ''} after ${retries + 1} attempts — ${body.slice(0, 300)}`,
+      )
       await sleep(2000 * 2 ** attempt)
       continue
     }
@@ -108,8 +121,8 @@ export async function searchPage(key, q, pageToken) {
  */
 export async function videosMeta(key, ids) {
   const out = []
-  for (let i = 0; i < ids.length; i += 50) {
-    const chunk = ids.slice(i, i + 50)
+  for (let i = 0; i < ids.length; i += VIDEOS_CHUNK) {
+    const chunk = ids.slice(i, i + VIDEOS_CHUNK)
     const data = await call(
       'videos',
       { part: 'snippet,status,contentDetails,statistics', id: chunk.join(',') },

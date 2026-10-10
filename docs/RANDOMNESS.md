@@ -85,6 +85,23 @@ Ordered by how much they should worry you.
    relevance-ranked slice. **This does not bias the sample**: the drop depends only on
    whether the _query string_ resembles text, which is independent of the videos whose IDs
    happen to start with it.
+   Enrichment applies the same rule. When `videos.list` omits ids that search just
+   returned, a second call is made for them. If it brings any back, or if many are still
+   missing, or if any of the three already-confirmed control ids placed at both ends of it
+   fails to come back, the responses are truncating — and a truncated response is a relevance-ranked
+   partial bucket — so every affected bucket is dropped whole. If it brings none back and
+   only a handful remain (at most 3, or 2% of the night's finds), they are treated as
+   videos that are gone from YouTube — deleted, made private, or a stale search-index entry — and only those ids are
+   dropped: they are outside the frame, and dropping their bucket-mates would not be.
+   A dropped bucket returns only when the re-harvest rotation reaches it again, which at
+   ~26 re-harvest buckets a night over ~3,000 drawn is roughly four months and grows with
+   the pool. `manifest.health.bucketsDroppedUnconfirmed` and `gone` record each night's
+   counts, so the rate can be watched rather than assumed.
+   The controls assume truncation keeps a contiguous run of the request in order, which
+   is the shape observed. A response that drops items from the middle, reorders and
+   drops, or omits particular ids on every call would read as deletions; that residual is
+   capped at the deletion budget — at most max(3, 2%) ids a night — and is accepted rather
+   than claimed away.
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
    they did not exist for earlier draws. A rolling fraction of each night's budget
    re-harvests older buckets to bound this.
