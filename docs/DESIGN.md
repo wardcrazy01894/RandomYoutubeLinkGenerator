@@ -161,12 +161,17 @@ problem, not the mechanism.
 | Measured (12 API buckets)        | 5.25          |
 | **Measured (live, 600 buckets)** | **5.33**      |
 
-The live figure is new ids per **exhausted** bucket over the 11 harvests of 2026-09-26 to
-10-07 (3,200 ids from 600 exhausted buckets; 89 more were dropped as unexhausted).
-Implied recall ≈ **0.97**, and the implied corpus is consistent with published ~1.4e10
-estimates — the "recall is catastrophically low" hypothesis is dead. Note that
-`manifest.health.yield` is a different number: new ids per bucket **drawn**, so it counts
-every unexhausted bucket as zero and runs ~4–5.
+The live figure is new ids per **exhausted** bucket over the 11 harvests of 2026-09-27 to
+10-07 (3,200 ids from 600 exhausted buckets; 89 more were dropped as unexhausted). It is
+slightly low: those buckets include 15 re-harvest buckets, which return almost nothing
+new, and the ids are counted before enrichment drops ~3% as non-public or too fresh.
+Fresh buckets alone give 5.33–5.47.
+
+Implied recall ≈ **0.97** (roughly 0.94–1.0 at n=600), **given** a 1.5e10 corpus — recall
+and corpus size cannot both be read off one number, so this is a consistency check, not an
+independent measurement. What it does rule out is the "recall is catastrophically low"
+hypothesis. Note that `manifest.health.yield` is a different number: new ids per **fresh
+bucket attempted**, so it counts every unexhausted bucket as zero and runs ~4–5.
 
 #### 3.3.5 Recency bias (MITIGATED)
 

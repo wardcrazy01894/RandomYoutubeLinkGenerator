@@ -36,8 +36,9 @@ Sample of YouTube_ (Journal of Quantitative Description, 2023).
 
 The frame is "videos whose ID has its first dash in position 6". Video IDs are assigned as
 essentially random values, so whether a given video's ID happens to have a dash there is
-**independent of its content, language, uploader, view count, and upload date**. That makes
-the frame a ~1.44% random slice of the corpus rather than a curated corner of it.
+**assumed to be independent of its content, language, uploader, view count, and upload
+date** — an assumption, not a published fact; §4.3 says what would break it. If it holds,
+the frame is a ~1.44% random slice of the corpus rather than a curated corner of it.
 
 Within the frame, 5-character prefixes partition the videos into ~39.4 million disjoint
 buckets. We draw buckets in a keyed pseudorandom order _without replacement_, and take
@@ -49,12 +50,14 @@ result uniform; taking part of one would not be.
 Two independent checks, both from the live pool:
 
 **Yield matches theory.** A 1.5 x 10^10 corpus predicts 5.50 videos per bucket. Over 600
-exhausted buckets (11 nights, late September to early October 2026) we measure **5.33**.
-Implied recall ≈ 0.97 — the search index returns nearly every video we ask for, so we are
-not silently missing a large slice.
+exhausted buckets (11 nights, late September to early October 2026) we measure **5.33**
+(slightly low, since a few re-harvest buckets are mixed in). Given that corpus size,
+implied recall is ≈ 0.97, roughly 0.94–1.0 — the search index returns nearly every video
+we ask for, so we are not silently missing a large slice. It is a consistency check rather
+than a proof: the same number could also mean a slightly smaller corpus.
 
 **The view distribution looks like research, not like popularity.** On 2026-10-10 the pool
-(12,577 videos) has a median of **76 views**, and **2.9%** have never been watched. The
+(12,577 harvested) has a median of **76 views**, and **2.9%** have never been watched. The
 independent 2023 study found ~41 and ~4%. Ours is not identical — our view counts are
 captured at harvest, and the pool skews recent (§4.6) — but a sampler skewed toward
 popular content would show medians in the thousands. This is still the most reassuring

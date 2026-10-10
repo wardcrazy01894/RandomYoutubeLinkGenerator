@@ -329,10 +329,12 @@ catches up on its own.)
 
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
 copied back and forth. The clone goes OUTSIDE the repo, so Prettier and ESLint never see
-the shard JSON:
+the shard JSON, and over the `github-wardcrazy` SSH alias, so the push authenticates as
+the repo owner even from a terminal whose `gh` is logged in as someone else:
 
 ```bash
-gh repo clone wardcrazy01894/RandomYoutubeLinkGenerator ../pool-data -- --branch pool --single-branch
+git clone --branch pool --single-branch \
+  git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git ../pool-data
 POOL_DIR=../pool-data npm run revalidate
 cd ../pool-data && git add -A \
   && git commit -m "revalidate: prune dead videos" && git push

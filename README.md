@@ -2,9 +2,10 @@
 
 One button. Click it, get a random YouTube video.
 
-Not a curated list, not a recommendation, not "trending". A **uniform random draw** from
-the public YouTube corpus — which means what you get is usually somebody's home video with
-59 views, in a language you may not read. That is what YouTube actually is.
+Not a curated list, not a recommendation, not "trending". A **uniform random draw** over a
+stated ~1.44% slice of YouTube's public videos, chosen so that it does not depend on what
+the videos are — which means what you get is usually somebody's home video with a few
+dozen views, in a language you may not read. That is what YouTube actually is.
 
 **[→ Open the site](https://wardcrazy01894.github.io/RandomYoutubeLinkGenerator/)**
 

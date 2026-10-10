@@ -6,7 +6,7 @@
   "engines": {
     "node": ">=22.13"
   },
-  "description": "A button that gives you a random YouTube video — a uniform draw over a stated, measured slice of YouTube's public corpus, not a curated list.",
+  "description": "A button that gives you a random YouTube video — a uniform draw over a stated slice of YouTube's public corpus, not a curated list.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
