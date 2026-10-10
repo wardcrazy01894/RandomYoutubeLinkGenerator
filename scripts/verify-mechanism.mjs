@@ -8,7 +8,7 @@
 // Three things are checked:
 //   1. Dash-token retrieval  — does q="my8exz" return the video "my8EXZ-mqpQ"?
 //   2. Case-insensitivity    — does it work with the query in the wrong case?
-//   3. Random-prefix yield   — what is the real videos-per-bucket at k=4?
+//   3. Random-prefix yield   — what is the real videos-per-bucket at PREFIX_LENGTH?
 //
 // Usage: YOUTUBE_API_KEY=... node scripts/verify-mechanism.mjs [numProbes]
 

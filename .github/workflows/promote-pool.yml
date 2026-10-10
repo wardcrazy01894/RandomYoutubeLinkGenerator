@@ -49,6 +49,7 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -eq 2 ]; then
+            # shellcheck disable=SC2016 # the backticks are literal Markdown, not a command
             echo 'No `pool` branch exists — nothing to promote.'; exit 1
           elif [ "$rc" -ne 0 ]; then
             echo "git ls-remote failed (exit $rc) — aborting rather than guessing"; exit 1

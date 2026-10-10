@@ -12,9 +12,13 @@ description = "Google/YouTube Data API key committed to the repo"
 regex = '''AIza[0-9A-Za-z_\-]{35}'''
 keywords = ["AIza"]
 
+# Only the files that are actually lists of video ids. manifest.json and state.json are
+# script-written too, but hold no ids — allowlisting them meant a key leaked into either
+# by a bug would never be flagged.
 [allowlist]
-description = "Generated pool data and lockfile"
+description = "Generated pool id lists and lockfile"
 paths = [
-  '''public/data/pool/.*\.json''',
+  '''public/data/pool/shard-\d+\.json''',
+  '''public/data/pool/(tombstones|blocklist)\.json''',
   '''package-lock\.json''',
 ]

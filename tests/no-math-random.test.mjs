@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 // Defence in depth for the project's central claim.
 //
-// The lint rule is CONFIG, and config has been wrong here in five distinct ways already:
+// The lint rule is CONFIG, and config has been wrong here in eight distinct ways already (CLAUDE.md lists them):
 // scoped to src/**/*.ts only (the Feistel sampler unguarded); a companion rule that was
 // dead and never fired; disarmed per-directory, per-filename, per-extension, and via
 // `ignores`; and — the subtlest — kept at severity 2 with the right NUMBER of selectors

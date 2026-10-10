@@ -45,7 +45,7 @@ console.log(`# Pool statistics
 
 Pool:            ${manifest.total} harvested, ${live.length} live, ${dead.size} tombstoned/blocked
 Buckets drawn:   ${buckets} of ${PREFIX_SPACE.toLocaleString()} (${pct(buckets, PREFIX_SPACE)} of the space)
-Yield:           ${yieldPer ? yieldPer.toFixed(2) : '—'} videos/bucket
+Yield (last run): ${yieldPer ? yieldPer.toFixed(2) : '—'} new videos per fresh bucket
 Last harvest:    ${manifest.generatedAt ?? 'never'} (${manifest.health?.status ?? 'unknown'})
 
 Median views:    ${median(views)}

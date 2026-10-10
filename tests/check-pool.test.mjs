@@ -146,3 +146,45 @@ describe('check-pool', () => {
     expect(run().code).toBe(1)
   })
 })
+
+describe('check-pool: invariants the client relies on', () => {
+  const ok = ['aaaaaaaaaaa', 'bbbbbbbbbbb']
+
+  it('rejects servable below total, which makes the tail undrawable', () => {
+    writeManifest({ servable: 1 })
+    writeShard(0, ok)
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/servable 1 != total 2/)
+  })
+
+  // The client degrades a malformed list to EMPTY, which silently un-blocks videos.
+  it('rejects a blocklist whose ids is not an array', () => {
+    writeManifest()
+    writeShard(0, ok)
+    writeFileSync(join(dir, 'blocklist.json'), JSON.stringify({ ids: 'x' }))
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/blocklist\.json: \.ids is not an array/)
+  })
+
+  it('rejects a tombstone that is not a video id', () => {
+    writeManifest()
+    writeShard(0, ok)
+    writeFileSync(
+      join(dir, 'tombstones.json'),
+      JSON.stringify({ ids: ['not an id'] }),
+    )
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/tombstones\.json: invalid video id/)
+  })
+
+  it('names the file when a shard is not valid JSON', () => {
+    writeManifest()
+    writeFileSync(join(dir, 'shard-00000.json'), '[{')
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/shard-00000\.json/)
+  })
+})

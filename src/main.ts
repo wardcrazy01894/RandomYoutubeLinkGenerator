@@ -12,7 +12,7 @@ import {
 
 // Auto-advancing past unplayable videos must terminate. Without a cap, a viewer in a
 // region where several consecutive draws are blocked sees an unbounded chain of blank
-// frames (docs/DESIGN.md §4.3).
+// frames (docs/DESIGN.md §5.3).
 const MAX_AUTO_ADVANCE = 5
 const DEAD_LIST_CAP = 2000
 const DEAD_KEY = 'ryl.dead.v1'
@@ -21,6 +21,7 @@ const DEAD_KEY = 'ryl.dead.v1'
 // harvester is alive — that is harvest-watchdog.yml's job. At 3 days this fired
 // between every pair of promotions and told viewers a healthy harvester was broken.
 const STALE_AFTER_DAYS = 14
+const PERMANENT_PLAYER_ERRORS = new Set([2, 100, 101, 150])
 // Validated once rather than encoded. encodeURIComponent would turn '@' into '%40',
 // which RFC 6068 does not permit in the addr-spec (the '@' must be literal; a
 // pct-encoded local-part like '%2B' for '+' is fine, so plus-aliases survive either
@@ -60,7 +61,12 @@ let autoAdvances = 0
 /** Locally-known-dead IDs, capped so localStorage cannot grow without bound. */
 function readDead(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(DEAD_KEY) ?? '[]')
+    const list: unknown = JSON.parse(localStorage.getItem(DEAD_KEY) ?? '[]')
+    // Shape-checked like the pool's exclusion lists: anything else written under this key
+    // (an older format, a hand edit) would otherwise spread into the excluded Set.
+    return Array.isArray(list)
+      ? list.filter((x): x is string => typeof x === 'string')
+      : []
   } catch {
     return []
   }
@@ -191,9 +197,12 @@ async function play(): Promise<void> {
       onStateChange: (e: { data: number }) => {
         if (e.data === YT.PlayerState.PLAYING) autoAdvances = 0
       },
-      // 100 = removed, 101/150 = embedding disallowed by the owner.
-      onError: async () => {
-        markDead(record.id)
+      // Every error advances, but only the PERMANENT codes hide the video for this viewer:
+      // 2 = invalid id, 100 = removed or private, 101/150 = embedding disallowed. Code 5
+      // (an HTML5 player error) and anything unknown can be transient — hiding on those
+      // took a video out of this viewer's draws for good after one network blip.
+      onError: async (e: { data: number }) => {
+        if (PERMANENT_PLAYER_ERRORS.has(e.data)) markDead(record.id)
         if (autoAdvances >= MAX_AUTO_ADVANCE) {
           showBanner(
             "Couldn't find a playable video after several tries — press the button to keep going.",
@@ -243,7 +252,9 @@ async function boot(): Promise<void> {
         lists.flat(),
       ),
     ])
-  } catch {
+  } catch (err) {
+    // The banner tells the viewer; this tells whoever is debugging it.
+    console.error('pool failed to load', err)
     els.subhead.textContent = 'The pool could not be loaded.'
     showBanner(
       'The video pool is unavailable right now. Please try again later.',
@@ -251,7 +262,9 @@ async function boot(): Promise<void> {
     return
   }
 
-  const n = manifest.servable
+  // servable counts every record, including tombstoned and blocklisted ones the draw
+  // will never return, so the headline number overstated what a viewer can get.
+  const n = Math.max(0, manifest.servable - new Set(blocked).size)
   els.subhead.textContent =
     n > 0
       ? `A uniform random draw from ${nf.format(n)} public YouTube videos.`
@@ -259,9 +272,13 @@ async function boot(): Promise<void> {
   els.draw.disabled = n === 0
 
   const age = poolAgeDays(manifest)
-  if (age !== null && age > STALE_AFTER_DAYS) {
-    showBanner(`Heads up: this video pool was last refreshed ${age} days ago.`)
-  }
+  // Kept so the safe-mode toggle can restore it: both share the one banner element, and
+  // re-checking safe mode used to hide the staleness notice for the rest of the visit.
+  const standingNotice =
+    age !== null && age > STALE_AFTER_DAYS
+      ? `Heads up: this video pool was last refreshed ${age} days ago.`
+      : null
+  if (standingNotice) showBanner(standingNotice)
   els.poolinfo.textContent = manifest.generatedAt
     ? `Pool last updated ${new Date(manifest.generatedAt).toLocaleDateString()} · ${nf.format(manifest.total)} harvested`
     : ''
@@ -276,8 +293,10 @@ async function boot(): Promise<void> {
   els.report.textContent = REPORT_TO ? 'Report this video' : 'Hide this video'
   els.report.addEventListener('click', report)
   els.safe.addEventListener('change', () => {
-    els.banner.hidden = els.safe.checked
-    if (!els.safe.checked) {
+    if (els.safe.checked) {
+      if (standingNotice) showBanner(standingNotice)
+      else els.banner.hidden = true
+    } else {
       showBanner(
         'Age-restriction and embeddability filtering are off. Removed, blocklisted and locally-hidden videos are still excluded.',
       )
