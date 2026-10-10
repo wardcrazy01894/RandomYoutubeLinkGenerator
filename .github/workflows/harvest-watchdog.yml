@@ -53,8 +53,17 @@ jobs:
             const runs = await github.rest.actions.listWorkflowRuns({
               owner, repo, workflow_id: 'harvest.yml', branch: 'main', per_page: 20,
             })
+            // A run still queued after MAX_QUEUED_HOURS is NOT alive: on 2026-10-10 two
+            // harvest runs sat queued with zero jobs indefinitely (a wedged concurrency
+            // group), and counting "queued" as alive made this watchdog report success
+            // while nothing ran. A normal queue wait is minutes.
+            const MAX_QUEUED_HOURS = 2
+            const queuedTooLong = (r) =>
+              (r.status === 'queued' || r.status === 'waiting' || r.status === 'pending') &&
+              (Date.now() - new Date(r.created_at).getTime()) / 3600_000 > MAX_QUEUED_HOURS
             const alive = (r) =>
-              r.status !== 'completed' || r.conclusion === 'success' || r.conclusion === 'failure'
+              (r.status !== 'completed' && !queuedTooLong(r)) ||
+              r.conclusion === 'success' || r.conclusion === 'failure'
             // Newest first, so the first live run is the newest one.
             const latest = runs.data.workflow_runs.find(alive)
             const ageHours = latest
