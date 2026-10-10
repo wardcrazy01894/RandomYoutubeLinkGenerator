@@ -6,8 +6,8 @@ name: harvest-watchdog
 # noticed. The site's banner cannot catch it either — it only sees main's pool, which
 # moves on promotion, not on harvest.
 #
-# This checks the age of harvest.yml's newest LIVE run on main: one still queued or
-# running, or one that finished as success or failure. Those are the outcomes where the
+# This checks the age of harvest.yml's newest LIVE run on main: one running, one waiting to
+# start for under 2 hours, or one that finished as success or failure. Those are the outcomes where the
 # harvest job actually ran, so a failure has already raised its own alarm. A
 # startup_failure (no job ever starts) or a cancellation (including the 60-minute job
 # timeout) skips harvest.yml's `if: failure()` step, so those do NOT count as alive — a
@@ -58,8 +58,9 @@ jobs:
             // group), and counting "queued" as alive made this watchdog report success
             // while nothing ran. A normal queue wait is minutes.
             const MAX_QUEUED_HOURS = 2
+            // Any not-yet-running status (queued, waiting, pending, requested, ...) counts.
             const queuedTooLong = (r) =>
-              (r.status === 'queued' || r.status === 'waiting' || r.status === 'pending') &&
+              r.status !== 'completed' && r.status !== 'in_progress' &&
               (Date.now() - new Date(r.created_at).getTime()) / 3600_000 > MAX_QUEUED_HOURS
             const alive = (r) =>
               (r.status !== 'completed' && !queuedTooLong(r)) ||
@@ -79,7 +80,7 @@ jobs:
             const body = [
               latest
                 ? `No harvest run has started its job in ${ageHours.toFixed(0)} hours (newest that did: ${latest.html_url}, created ${latest.created_at}).`
-                : `None of the last 20 harvest.yml runs on main reached its job (each was startup_failure, cancelled, timed_out, skipped, or stale).`,
+                : `None of the last 20 harvest.yml runs on main reached its job (each was startup_failure, cancelled, timed_out, skipped, stale, or stuck waiting to start for over ${MAX_QUEUED_HOURS}h).`,
               ``,
               `A run that never starts files no failure issue of its own, which is why this`,
               `watchdog exists. Check that the workflow is still enabled`,
