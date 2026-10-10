@@ -2,7 +2,9 @@
 
 **Status:** revision 2 — incorporates three adversarial reviews (statistical, operational,
 product/safety), all of which returned BLOCK on revision 1.
-**Date:** 2026-08-19
+**Date:** 2026-08-19, kept current since. The method (§3) is as designed. The architecture
+(§4) changed after launch: `main`, not the `pool` branch, is what the site serves (§4.3),
+and the figures in §3.3.4 and §3.7 have been re-measured on the live pool.
 
 ## 1. Goal
 
@@ -96,10 +98,10 @@ That would make the stratum an unbiased `(63/64)^5 / 64 = 1.444%` subsample.
 generator was constant from 2005 to now. If it changed, dash position correlates with
 upload era, and era correlates with everything.
 
-_Test T1:_ our pool constrains positions 1–5 only; positions 6–11 are unconditioned.
-Chi-square positions 6–10 against uniform-64 and position 11 against uniform-16,
-**split by `publishedAt` year**. Published in RANDOMNESS.md, regenerated every harvest.
-Until T1 has power, the docs say "assumed independent", not "is independent".
+_Test T1 (designed, not yet built):_ our pool constrains positions 1–5 only; positions
+6–11 are unconditioned. Chi-square positions 6–10 against uniform-64 and position 11
+against uniform-16, **split by `publishedAt` year**. No script computes this yet, so
+nothing is published and the docs say "assumed independent", not "is independent".
 
 #### 3.3.2 Last-token collision (FIXED)
 
@@ -126,7 +128,8 @@ partially. At k=5 roughly 83% of buckets are exhaustible in a single page (§3.7
 because its 5-character prefix happens to resemble ordinary text (`ilfat`, `gl1u_`), so it
 collides with thousands of title and description matches. That is a property of _the query
 string_, not of the videos whose IDs begin with it — those are random with respect to it.
-So the drop costs ~17% of yield without skewing what survives.
+So the drop costs yield without skewing what survives: ~17% in the 12-bucket pilot, ~13%
+measured live (89 of 689 buckets over 11 nights to 2026-10-07).
 
 The same whole-bucket rule applies at enrichment. Ids that search returned but
 `videos.list` omits get a confirming second call, as `revalidate.mjs` has done since the
@@ -150,16 +153,26 @@ uniformity would fail at the mechanism level and nothing downstream could repair
 shared with fuzzy filler, so it was hiding most of each bucket — the instrument was the
 problem, not the mechanism.
 
-|                               | videos/bucket |
-| ----------------------------- | ------------- |
-| Predicted, corpus 9.0e9       | 3.30          |
-| **Predicted, corpus 1.5e10**  | **5.50**      |
-| Predicted, corpus 2.0e10      | 7.34          |
-| **Measured (12 API buckets)** | **5.25**      |
+|                                  | videos/bucket |
+| -------------------------------- | ------------- |
+| Predicted, corpus 9.0e9          | 3.30          |
+| **Predicted, corpus 1.5e10**     | **5.50**      |
+| Predicted, corpus 2.0e10         | 7.34          |
+| Measured (12 API buckets)        | 5.25          |
+| **Measured (live, 600 buckets)** | **5.33**      |
 
-Implied recall ≈ **0.95**, and the implied corpus is consistent with published ~1.4e10
-estimates. n=12 is small and the interval is wide, so the harvester keeps measuring this
-every run and publishes it; but the "recall is catastrophically low" hypothesis is dead.
+The live figure is new ids per **exhausted** bucket over the 11 harvests of 2026-09-27 to
+10-07 (3,200 ids from 600 exhausted buckets; 89 more were dropped as unexhausted). Two
+caveats pull in opposite directions. Those buckets include 15 re-harvest buckets, which
+return almost nothing new, so it reads slightly low — fresh buckets alone give 5.33–5.47.
+Conversely, ids are counted before enrichment drops ~3% as non-public or too fresh, which
+nudges it up.
+
+Implied recall ≈ **0.97** (roughly 0.94–1.0 at n=600), **given** a 1.5e10 corpus — recall
+and corpus size cannot both be read off one number, so this is a consistency check, not an
+independent measurement. What it does rule out is the "recall is catastrophically low"
+hypothesis. Note that `manifest.health.yield` is a different number: new ids per **fresh
+bucket attempted**, so it counts every unexhausted bucket as zero and runs ~4–5.
 
 #### 3.3.5 Recency bias (MITIGATED)
 
@@ -192,21 +205,25 @@ Revision 1 drew prefixes i.i.d. with replacement. Review confirmed this is _unbi
 cluster sampling), but it is strictly worse than the alternative.
 
 We instead enumerate the prefix space in a **pseudorandom order without replacement**,
-using a keyed Feistel permutation over `[0, 37^3 x 21)` with cycle-walking. State is a
+using a keyed Feistel permutation over `[0, 37^4 x 21)` (39,357,381 prefixes) with
+cycle-walking. State is a
 single integer counter in git. Exactly uniform, lower variance, no repeats, and it makes
 the §3.3.5 rolling re-harvest natural.
 
 ### 3.5 Corpus estimate — not published yet
 
-`stratum ≈ λ̂ x 63^k`, `corpus ≈ stratum / 0.01467`.
+`stratum ≈ λ̂ x PREFIX_SPACE`, `corpus ≈ stratum / 0.01444` (`(63/64)^5 / 64`, the k=5
+rate; `npm run pool-stats` computes it).
 
 The 12-bucket API pilot implies ~1.4e10, consistent with published estimates — but the
 interval at n=12 is far too wide to publish a point estimate, and the estimator is
 circular with respect to §3.3.1 (it divides by the very rate that assumption asserts).
 
 So it stays a **lower bound on token-indexed searchable videos**, not a corpus estimate.
-No point estimate is published until n >= 2,000 buckets, and then only with its interval.
-The harvester accumulates toward that automatically.
+The original bar was n >= 2,000 buckets with an interval; that count was passed in early
+October 2026 (2,962 drawn), but no interval is computed yet and the circularity above is
+unchanged, so nothing is published. `pool-stats` prints the raw lower bound for
+inspection only.
 
 ### 3.6 Why the official API, and the quota budget
 
@@ -271,10 +288,13 @@ Harvest into a committed pool; serve a fully static site.
   scripts/harvest.mjs  --(YouTube Data API v3, key from secrets)-->  search.list + videos.list
         |
         v
-  data/pool/shard-NNNN.json (immutable, fixed 1000 records) + manifest.json + tombstones.json
-        |  pushed DIRECTLY to the unprotected `pool` branch
+  public/data/pool/shard-NNNNN.json (immutable, 1000 records) + manifest + state + tombstones
+        |  pushed to the unprotected `pool` branch (staging; viewers never see it)
         v
-  reusable deploy workflow -> Vite build -> GitHub Pages
+  promote-pool.yml (dispatched) -> promote/pool branch -> PR -> required checks -> main
+        |
+        v
+  push to main -> deploy.yml -> deploy-pages.yml -> Vite build -> GitHub Pages
         |
         v
   browser: uniform pick -> title + blurred thumb -> explicit Play -> youtube-nocookie embed
@@ -477,15 +497,15 @@ Matching the house conventions, plus what review found missing:
 - **`.gitattributes`** marking the pool `linguist-generated -diff`, or every diff is a wall
 - `scripts/protect-main.sh` — idempotent, 0 required approvals (solo repo)
 - `docs/OPERATIONS.md` — the runbook for a silently-broken harvester
-- `docs/RANDOMNESS.md` — regenerated from real numbers each harvest so it cannot rot
+- `docs/RANDOMNESS.md` — its figures come from `npm run pool-stats` on the live pool; that
+  is run by hand, not by the harvest, so they are refreshed in PRs like any other doc
 - `.nvmrc`, dependabot, PR template
 
 ## 8. What the site actually claims
 
 "Truly random" is not defensible and is retired. The real frame is: _public videos that are
-in the search index, have a dash at position 5, are embeddable in the default view,
-survived re-validation, and
-are not blocklisted._
+in the search index, have their first dash at position 6, are embeddable in the default
+view, survived re-validation, and are not blocklisted._
 
 Uniform-over-a-stated-frame is a **stronger** claim than "truly random", because it is
 checkable. UI copy: headline "Random YouTube"; subhead "A uniform random draw from N

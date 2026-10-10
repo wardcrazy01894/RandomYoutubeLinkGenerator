@@ -301,10 +301,14 @@ gh api -X DELETE repos/wardcrazy01894/RandomYoutubeLinkGenerator/pages       # d
 Disabling Pages takes effect in under a minute.
 
 To remove a single video instead, add its ID to `public/data/pool/blocklist.json` on
-**`main`** and merge. `main` is authoritative for the blocklist: both the deploy and the
-harvest workflows overwrite the branch's copy with main's after restoring the pool, so an
-entry added here propagates on the next deploy and is then carried onto the `pool` branch.
-The site filters blocklisted IDs at draw time.
+**`main`** and merge. `main` is authoritative for the blocklist: the site is built from
+main, so the entry takes effect on the next deploy, and the harvest copies main's
+blocklist over the `pool` branch's each night. The site filters blocklisted IDs at draw
+time.
+
+The id must already be in main's pool — `check-pool` fails otherwise, because the site's
+headline count subtracts the blocklist. To pull a video you spotted in a pending
+promotion PR, add it to `blocklist.json` in that PR, or on main once it has merged.
 
 ## Running the re-validation sweep (read this first)
 
@@ -324,7 +328,17 @@ pull a dead video, and the next promotion merges rather than overwrites, so the 
 catches up on its own.)
 
 Run it against the live pool instead, using the `POOL_DIR` override so nothing has to be
-copied back and forth:
+copied back and forth. The clone goes OUTSIDE the repo, so Prettier and ESLint never see
+the shard JSON, and over the `github-wardcrazy` SSH alias, so the push authenticates as
+the repo owner even from a terminal whose `gh` is logged in as someone else:
+
+```bash
+git clone --branch pool --single-branch \
+  git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git ../pool-data
+POOL_DIR=../pool-data npm run revalidate
+cd ../pool-data && git add -A \
+  && git commit -m "revalidate: prune dead videos" && git push
+```
 
 The sweep refuses to write if a single run would remove more than 20% of what it checked
 — provided at least 3 removals are involved, so two
@@ -362,18 +376,10 @@ guard **and** the whole-run guard, and trusts whatever the second call leaves mi
 it only on a night `lastSweep.truncatedBatches` and `refusedBatches` are zero: under a
 flaking API it tombstones live videos in exactly the way the guards exist to prevent.
 
-```bash
-git clone --branch pool --single-branch \
-  git@github-wardcrazy:wardcrazy01894/RandomYoutubeLinkGenerator.git pool-data
-POOL_DIR=pool-data npm run revalidate
-cd pool-data && git add -A \
-  && git commit -m "revalidate: prune dead videos" && git push
-```
-
 The split is deliberate: `blocklist.json` is human-curated and lives on `main` so removals
 go through review, while `tombstones.json` is machine-generated sweep output and belongs
-with the pool data. Automating the sweep as a workflow would remove this footgun and is
-the right follow-up.
+with the pool data. The nightly sweep in `harvest.yml` is the normal path; this manual
+one is for the rare case above.
 
 ## Manual operations
 
@@ -381,7 +387,7 @@ the right follow-up.
 npm run harvest                      # spend the default 9000 units
 HARVEST_UNITS=1000 npm run harvest   # a small run (500 is the minimum that works)
 npm run revalidate                   # sweep for dead/removed videos
-npm run pool-stats                   # regenerate the numbers in RANDOMNESS.md
+npm run pool-stats                   # print the figures quoted in RANDOMNESS.md
 node scripts/check-pool.mjs          # structural invariants
 node scripts/verify-mechanism.mjs    # is the dash-token trick still alive?
 bash scripts/protect-main.sh         # re-apply branch protection (idempotent)

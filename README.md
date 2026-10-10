@@ -2,9 +2,10 @@
 
 One button. Click it, get a random YouTube video.
 
-Not a curated list, not a recommendation, not "trending". A **uniform random draw** from
-the public YouTube corpus — which means what you get is usually somebody's home video with
-59 views, in a language you may not read. That is what YouTube actually is.
+Not a curated list, not a recommendation, not "trending". A **uniform random draw** over a
+stated ~1.44% slice of YouTube's public videos — which means what you get is usually
+somebody's home video with a few dozen views, in a language you may not read. That is what
+YouTube actually is.
 
 **[→ Open the site](https://wardcrazy01894.github.io/RandomYoutubeLinkGenerator/)**
 
@@ -26,8 +27,9 @@ it means clicking the button never touches YouTube's API.
 
 **How random is it really?** [`docs/RANDOMNESS.md`](docs/RANDOMNESS.md) states the exact
 frame and every known bias. The short version: uniform over a stated frame, not "truly
-random" — and the pool's median view count (~59) and never-watched rate (~4%) independently
-match published research (~41 and ~4%), which a popularity-biased sampler could not do.
+random" — and the pool's median view count (76) and never-watched rate (2.9%), as of 2026-10-10, sit close to
+published research (~41 and ~4%), where a popularity-biased sampler would show medians in
+the thousands.
 
 ## Safety
 
@@ -61,17 +63,17 @@ Create one at [console.cloud.google.com](https://console.cloud.google.com), enab
 
 ## Commands
 
-| Command                                       | What it does                               |
-| --------------------------------------------- | ------------------------------------------ |
-| `npm run dev`                                 | Local dev server                           |
-| `npm run build`                               | Production build                           |
-| `npm test`                                    | Unit tests                                 |
-| `npm run typecheck` / `lint` / `format:check` | The CI gates                               |
-| `npm run harvest`                             | Sample new buckets into the pool           |
-| `npm run revalidate`                          | Sweep the pool for dead/removed videos     |
-| `npm run pool-stats`                          | Regenerate the measured randomness numbers |
-| `node scripts/verify-mechanism.mjs`           | Check the dash-token trick still works     |
-| `node scripts/check-pool.mjs`                 | Pool structural invariants                 |
+| Command                                       | What it does                           |
+| --------------------------------------------- | -------------------------------------- |
+| `npm run dev`                                 | Local dev server                       |
+| `npm run build`                               | Production build                       |
+| `npm test`                                    | Unit tests                             |
+| `npm run typecheck` / `lint` / `format:check` | The CI gates                           |
+| `npm run harvest`                             | Sample new buckets into the pool       |
+| `npm run revalidate`                          | Sweep the pool for dead/removed videos |
+| `npm run pool-stats`                          | Print the measured randomness numbers  |
+| `node scripts/verify-mechanism.mjs`           | Check the dash-token trick still works |
+| `node scripts/check-pool.mjs`                 | Pool structural invariants             |
 
 ## Layout
 
@@ -79,7 +81,8 @@ Create one at [console.cloud.google.com](https://console.cloud.google.com), enab
 src/            static site — random.ts is the CSPRNG draw, pool.ts the uniform pick
 scripts/        harvester, revalidation, integrity checks
   lib/prefix.mjs   the prefix space + Feistel without-replacement enumeration
-public/data/pool/  the sampled pool (generated; live copy lives on the `pool` branch)
+public/data/pool/  the sampled pool, as served (nightly harvests stage on the `pool` branch
+                   and reach main only through a reviewed promotion PR)
 docs/           DESIGN.md · RANDOMNESS.md · OPERATIONS.md
 ```
 
