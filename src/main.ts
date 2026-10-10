@@ -16,7 +16,11 @@ import {
 const MAX_AUTO_ADVANCE = 5
 const DEAD_LIST_CAP = 2000
 const DEAD_KEY = 'ryl.dead.v1'
-const STALE_AFTER_DAYS = 3
+// generatedAt only reaches the site when a promotion merges, and promotions are manual
+// and roughly weekly. So this measures how old the PUBLISHED pool is, not whether the
+// harvester is alive — that is harvest-watchdog.yml's job. At 3 days this fired
+// between every pair of promotions and told viewers a healthy harvester was broken.
+const STALE_AFTER_DAYS = 14
 // Validated once rather than encoded. encodeURIComponent would turn '@' into '%40',
 // which RFC 6068 does not permit in the addr-spec (the '@' must be literal; a
 // pct-encoded local-part like '%2B' for '+' is fine, so plus-aliases survive either
@@ -256,9 +260,7 @@ async function boot(): Promise<void> {
 
   const age = poolAgeDays(manifest)
   if (age !== null && age > STALE_AFTER_DAYS) {
-    showBanner(
-      `Heads up: the pool hasn't been updated in ${age} days — the harvester may be broken.`,
-    )
+    showBanner(`Heads up: this video pool was last refreshed ${age} days ago.`)
   }
   els.poolinfo.textContent = manifest.generatedAt
     ? `Pool last updated ${new Date(manifest.generatedAt).toLocaleDateString()} · ${nf.format(manifest.total)} harvested`

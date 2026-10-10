@@ -146,7 +146,11 @@ export async function drawRandom(
   )
 }
 
-/** Days since the pool was last updated, for the staleness banner. */
+/**
+ * Days since the published pool was last harvested, for the staleness banner. This is
+ * the age of what main serves, not a harvester liveness signal: it only moves when a
+ * promotion merges.
+ */
 export function poolAgeDays(
   manifest: Manifest,
   now = Date.now(),
