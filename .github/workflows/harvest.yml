@@ -121,7 +121,7 @@ jobs:
               # is all that is wanted; the branch simply gains a commit that returns it to
               # main's state.
             fi
-            echo "Restored $(ls public/data/pool | wc -l) files from the pool branch"
+            echo "Restored $(find public/data/pool -maxdepth 1 -type f | wc -l) files from the pool branch"
           elif [ "$rc" -eq 2 ]; then
             echo "No pool branch yet — it will be created from the seed in main."
           else
@@ -133,7 +133,7 @@ jobs:
           # would round-trip its own frozen copy forever.
           # Not an AND-list: set -e is exempt inside one, so this is safe today only
           # because it is the step's last line. Any line added below would silently
-          # reintroduce the failure. Same form as deploy-pages.yml.
+          # reintroduce the failure.
           git show HEAD:public/data/pool/blocklist.json > /tmp/blocklist.json \
             || { echo "Could not read blocklist.json from main — refusing to continue"; exit 1; }
           mv /tmp/blocklist.json public/data/pool/blocklist.json

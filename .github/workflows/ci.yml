@@ -45,6 +45,22 @@ jobs:
         run: npm run format:check
       - name: Build (vite)
         run: npm run build
+      # The harvest, promote and deploy workflows only run on cron, dispatch or main, so a
+      # PR could be fully green while breaking them. actionlint type-checks expressions,
+      # `needs`/`steps` references and action inputs across every workflow, and runs
+      # shellcheck over `run:` blocks (preinstalled on ubuntu-latest). Downloaded at a
+      # pinned version and verified against a pinned checksum rather than via an
+      # install script.
+      - name: Lint workflows (actionlint)
+        run: |
+          set -euo pipefail
+          v=1.7.12
+          sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          f="actionlint_${v}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/rhysd/actionlint/releases/download/v${v}/${f}"
+          echo "${sha}  $RUNNER_TEMP/$f" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
 
   test:
     name: test
@@ -86,6 +102,6 @@ jobs:
         with:
           fetch-depth: 0 # full history so gitleaks can scan all commits on the branch
       - name: Scan for secrets (gitleaks)
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

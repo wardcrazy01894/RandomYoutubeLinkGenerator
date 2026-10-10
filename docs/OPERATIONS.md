@@ -11,7 +11,7 @@ Everything here exists to make that loud.
 | 08:17 UTC daily        | Harvest ~89 buckets, sweep 25k records, push | `.github/workflows/harvest.yml`          |
 | On push to `main`      | Build + deploy the site                      | `.github/workflows/deploy.yml`           |
 | Nightly (with harvest) | Re-validation sweep                          | `harvest.yml` step                       |
-| 22:43 UTC daily        | Alarm if no harvest run started in 36h       | `.github/workflows/harvest-watchdog.yml` |
+| 22:43 UTC daily        | Alarm if no harvest run ran its job in 36h   | `.github/workflows/harvest-watchdog.yml` |
 
 ## Promoting the pool into `main`
 

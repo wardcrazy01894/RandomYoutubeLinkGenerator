@@ -1,8 +1,10 @@
 import js from '@eslint/js'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
+import { defineConfig } from 'eslint/config'
 
-export default tseslint.config(
+// defineConfig rather than tseslint.config(), which typescript-eslint 8 deprecated.
+export default defineConfig(
   { ignores: ['dist', 'node_modules', 'public/data'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,

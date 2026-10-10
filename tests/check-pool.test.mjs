@@ -146,3 +146,70 @@ describe('check-pool', () => {
     expect(run().code).toBe(1)
   })
 })
+
+describe('check-pool: invariants the client relies on', () => {
+  const ok = ['aaaaaaaaaaa', 'bbbbbbbbbbb']
+
+  it('rejects servable below total, which makes the tail undrawable', () => {
+    writeManifest({ servable: 1 })
+    writeShard(0, ok)
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/servable 1 != total 2/)
+  })
+
+  // The client degrades a malformed list to EMPTY, which silently un-blocks videos.
+  it('rejects a blocklist whose ids is not an array', () => {
+    writeManifest()
+    writeShard(0, ok)
+    writeFileSync(join(dir, 'blocklist.json'), JSON.stringify({ ids: 'x' }))
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/blocklist\.json: \.ids is not an array/)
+  })
+
+  it('rejects a tombstone that is not a video id', () => {
+    writeManifest()
+    writeShard(0, ok)
+    writeFileSync(
+      join(dir, 'tombstones.json'),
+      JSON.stringify({ ids: ['not an id'] }),
+    )
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/tombstones\.json: invalid video id/)
+  })
+
+  // The client subtracts these lists from servable for its headline count, so an id
+  // that is not in the pool would undercount it.
+  it('rejects a blocklist id that is not in the pool', () => {
+    writeManifest()
+    writeShard(0, ok)
+    writeFileSync(
+      join(dir, 'blocklist.json'),
+      JSON.stringify({ ids: ['ccccccccccc'] }),
+    )
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/blocklist\.json: id ccccccccccc is not in the pool/)
+  })
+
+  it('accepts exclusion lists whose ids are all in the pool', () => {
+    writeManifest()
+    writeShard(0, ok)
+    writeFileSync(join(dir, 'blocklist.json'), JSON.stringify({ ids: [ok[0]] }))
+    writeFileSync(
+      join(dir, 'tombstones.json'),
+      JSON.stringify({ ids: [ok[1]] }),
+    )
+    expect(run().code).toBe(0)
+  })
+
+  it('names the file when a shard is not valid JSON', () => {
+    writeManifest()
+    writeFileSync(join(dir, 'shard-00000.json'), '[{')
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/shard-00000\.json/)
+  })
+})

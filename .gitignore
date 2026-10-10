@@ -4,11 +4,11 @@ dist
 *.local
 .env
 .env.local
-# Harvester scratch output
-.harvest-cache
-
 # Working copy of the `pool` branch, created by the harvest workflow
 .pool-branch
 
 # local test reporter output
 .vitest/
+
+# Agent worktrees (Claude Code isolation); never part of the repo
+.claude/worktrees/

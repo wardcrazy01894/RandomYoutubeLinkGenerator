@@ -71,25 +71,35 @@ export async function loadManifest(): Promise<Manifest> {
  * deleted video cannot play, and onError already hides it. Fetching this still matters,
  * because it keeps the served count honest rather than per-viewer.)
  */
-export async function loadTombstones(): Promise<string[]> {
+export const loadTombstones = (): Promise<string[]> =>
+  loadIdList('tombstones.json')
+
+/** IDs the maintainer removed by hand. */
+export const loadBlocklist = (): Promise<string[]> =>
+  loadIdList('blocklist.json')
+
+/**
+ * An exclusion list, degrading to empty so a missing file never takes the site down.
+ * Degrading SILENTLY did: a 404 on blocklist.json quietly un-blocked every video in it,
+ * with nothing in the console to say so. So every degraded path warns, naming the file.
+ */
+async function loadIdList(file: string): Promise<string[]> {
   try {
-    const res = await fetch(`${base}/tombstones.json`, { cache: 'no-cache' })
-    if (!res.ok) return []
-    const ids = (await res.json())?.ids
+    const res = await fetch(`${base}/${file}`, { cache: 'no-cache' })
+    if (!res.ok) {
+      console.warn(`${file} unavailable (${res.status}); not excluding its ids`)
+      return []
+    }
+    const ids: unknown = (await res.json())?.ids
     // Shape-checked: a malformed `ids` (a string, say) would otherwise spread into the
     // exclusion Set one character at a time.
-    return Array.isArray(ids) ? ids : []
-  } catch {
+    if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
+      return ids
+    }
+    console.warn(`${file} has no string array at .ids; not excluding its ids`)
     return []
-  }
-}
-
-export async function loadBlocklist(): Promise<string[]> {
-  try {
-    const res = await fetch(`${base}/blocklist.json`, { cache: 'no-cache' })
-    if (!res.ok) return []
-    return (await res.json()).ids ?? []
-  } catch {
+  } catch (err) {
+    console.warn(`${file} could not be loaded; not excluding its ids`, err)
     return []
   }
 }

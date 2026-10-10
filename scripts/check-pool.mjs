@@ -11,6 +11,7 @@ import {
   readManifest,
   readShard,
   readTombstones,
+  readBlocklist,
   POOL_DIR,
   SHARD_SIZE,
 } from './lib/pool.mjs'
@@ -105,6 +106,35 @@ if (counted !== manifest.total)
 if (manifest.servable > manifest.total)
   fail(`servable ${manifest.servable} exceeds total ${manifest.total}`)
 if (manifest.servable < 0) fail(`servable is negative: ${manifest.servable}`)
+// lib/pool.mjs documents servable === total as an invariant: the client indexes positions
+// in [0, servable), so a smaller servable makes the pool's tail silently undrawable.
+// Nothing checked it.
+if (manifest.servable !== manifest.total)
+  fail(
+    `servable ${manifest.servable} != total ${manifest.total}; the tail would be undrawable`,
+  )
+
+// The client shape-checks these and degrades to an EMPTY exclusion list on bad input, so
+// a malformed file does not break the site — it silently un-blocks or resurrects videos.
+// Catch it here instead, where it fails a PR. Every id must also be IN the pool: the
+// client's headline count subtracts these lists from servable, so a typo'd or
+// never-harvested id would undercount it (and could disable the draw on a tiny pool).
+// `ids` is the set the shard loop above already built, so a malformed shard is reported
+// there rather than crashing here.
+for (const [name, list] of [
+  ['blocklist.json', readBlocklist()],
+  ['tombstones.json', readTombstones()],
+]) {
+  if (!Array.isArray(list?.ids)) {
+    fail(`${name}: .ids is not an array`)
+    continue
+  }
+  for (const id of list.ids) {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(id))
+      fail(`${name}: invalid video id ${JSON.stringify(id)}`)
+    else if (!ids.has(id)) fail(`${name}: id ${id} is not in the pool`)
+  }
+}
 
 if (problems.length > 0) {
   console.error('Pool integrity FAILED:')

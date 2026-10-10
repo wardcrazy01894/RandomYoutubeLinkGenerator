@@ -46,8 +46,15 @@ const STATE = join(POOL_DIR, 'state.json')
 const TOMBSTONES = join(POOL_DIR, 'tombstones.json')
 const BLOCKLIST = join(POOL_DIR, 'blocklist.json')
 
-const readJson = (p, fallback) =>
-  existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : fallback
+const readJson = (p, fallback) => (existsSync(p) ? parseFile(p) : fallback)
+/** JSON.parse with the file named: a bare SyntaxError did not say which shard was corrupt. */
+function parseFile(p) {
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'))
+  } catch (err) {
+    throw new Error(`${p}: ${err.message}`, { cause: err })
+  }
+}
 const writeJson = (p, v) => {
   mkdirSync(dirname(p), { recursive: true })
   writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`)
@@ -91,8 +98,7 @@ export function readAllIds() {
   if (!existsSync(POOL_DIR)) return ids
   for (const f of readdirSync(POOL_DIR)) {
     if (!/^shard-\d+\.json$/.test(f)) continue
-    for (const r of JSON.parse(readFileSync(join(POOL_DIR, f), 'utf8')))
-      ids.add(r.id)
+    for (const r of parseFile(join(POOL_DIR, f))) ids.add(r.id)
   }
   return ids
 }

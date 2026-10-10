@@ -25,6 +25,9 @@ Anything touching sampling, the prefix space, the pool format, or the draw must 
 
 ## Checklist
 
-- [ ] `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` pass locally
+- [ ] `npm run typecheck && npm run lint && npm run format:check && npm test && npm run build`
+      and `node scripts/check-pool.mjs` pass locally (judged by exit code, not tailed output)
+- [ ] `adversarial-reviewer` run against the actual diff; each finding fixed or dismissed
+      with a reason (CLAUDE.md — every PR, however small)
 - [ ] No secrets committed (the API key lives in `.env.local` / Actions secrets)
 - [ ] Branch will be deleted on merge

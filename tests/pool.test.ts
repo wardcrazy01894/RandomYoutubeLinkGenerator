@@ -3,6 +3,8 @@ import {
   drawRandom,
   poolAgeDays,
   clearShardCache,
+  loadBlocklist,
+  loadTombstones,
   EmptyPoolError,
   type Manifest,
   type PoolRecord,
@@ -223,6 +225,43 @@ describe('tombstones', () => {
       expect(excluded.has(r.id)).toBe(false)
     }
   })
+})
+
+describe('exclusion lists', () => {
+  const serve = (body: unknown, ok = true) =>
+    vi.stubGlobal('fetch', async () => ({
+      ok,
+      status: ok ? 200 : 404,
+      json: async () => body,
+    }))
+
+  // loadBlocklist had no shape check: a string `ids` spread into the exclusion Set one
+  // character at a time, and a 404 un-blocked everything without a word in the console.
+  for (const [name, load] of [
+    ['blocklist', loadBlocklist],
+    ['tombstones', loadTombstones],
+  ] as const) {
+    it(`${name}: returns the ids when well-formed`, async () => {
+      serve({ ids: ['abcdefghijk'] })
+      expect(await load()).toEqual(['abcdefghijk'])
+    })
+
+    it(`${name}: rejects a malformed ids field, and says so`, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      serve({ ids: 'abcdefghijk' })
+      expect(await load()).toEqual([])
+      expect(warn).toHaveBeenCalled()
+      warn.mockRestore()
+    })
+
+    it(`${name}: warns rather than silently dropping the list on a 404`, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      serve(null, false)
+      expect(await load()).toEqual([])
+      expect(String(warn.mock.calls[0]?.[0])).toMatch(/404/)
+      warn.mockRestore()
+    })
+  }
 })
 
 describe('poolAgeDays', () => {
