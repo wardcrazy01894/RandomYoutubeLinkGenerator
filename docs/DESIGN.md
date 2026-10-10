@@ -164,7 +164,7 @@ problem, not the mechanism.
 The live figure is new ids per **exhausted** bucket over the 11 harvests of 2026-09-27 to
 10-07 (3,200 ids from 600 exhausted buckets; 89 more were dropped as unexhausted). Two
 caveats pull in opposite directions. Those buckets include 15 re-harvest buckets, which
-return almost nothing new, so it reads slightly low — fresh buckets alone give 5.33–5.47.
+return almost nothing new, so it reads slightly low — fresh buckets alone give about 5.47 (3,200 / 585).
 Conversely, ids are counted before enrichment drops ~3% as non-public or too fresh, which
 nudges it up.
 
@@ -181,9 +181,17 @@ uploaded. A video uploaded halfway through a year of harvesting has half the inc
 probability of one that existed at the start; one uploaded today has ~0. This is O(1), not
 O(1/N) — revision 1 missed it entirely.
 
-**Fix:** a fixed fraction of each night's budget re-harvests the oldest previously-drawn
-buckets on a rolling window, bounding the bias by the window rather than by project
-lifetime. The window length is published.
+**Fix:** a fixed fraction (30%) of each night's plan re-harvests previously drawn buckets,
+cycling a cursor over every bucket drawn so far, so each is re-visited once per rotation.
+The rotation is not a fixed window: it is `counter ÷ re-harvest buckets per night`, so it
+grows as the pool does — about 160 nights at ~3,000 buckets drawn and ~19 re-harvest
+buckets a night. The bias is bounded by that rotation, not by project lifetime.
+
+Fresh and re-harvest entries are **interleaved** in the plan at that ratio. Until October
+2026 they ran fresh-first, and since the budget routinely runs out ~20 entries early
+(unexhausted buckets cost up to three searches), the entries left unrun were always
+re-harvest: it got 0–4 of its 26 a night and the mitigation was effectively off. The cost
+of interleaving is a slower frontier — ~44 fresh buckets a night rather than ~60.
 
 #### 3.3.6 Remaining honest biases
 
@@ -242,16 +250,18 @@ Daily budget against 10,000 units, at the measured k=5 rate of ~5 videos/bucket:
 
 | Call                               | Unit cost  | Per day   | Units |
 | ---------------------------------- | ---------- | --------- | ----- |
-| `search.list` (new buckets)        | 100        | ~62       | 6,200 |
-| `search.list` (rolling re-harvest) | 100        | ~27       | 2,700 |
+| `search.list` (new buckets)        | 100        | ~44       | 6,200 |
+| `search.list` (rolling re-harvest) | 100        | ~19       | 2,700 |
 | `videos.list` enrichment           | 1 / 50 IDs | ~10 calls | 10    |
 | Re-validation sweep (§5.3)         | 1 / 50 IDs | 25,000    | 500   |
 | Reserve                            |            |           | ~590  |
 
-62 + 27 ≈ 89 buckets/night, of which ~83% exhaust, x ~5 members = **~370 new
-videos/night**, each fully enriched. `HARVEST_UNITS` defaults to 9,000 rather than the
+The plan sizes buckets at one search (62 fresh + 27 re-harvest = 89), but ~13% of buckets
+are unexhausted and cost three, so ~60–67 actually run: ~44 fresh and ~19 re-harvest,
+interleaved. At ~5 members per exhausted fresh bucket that is **~200 new videos/night**,
+each fully enriched; re-harvest buckets add a few more. `HARVEST_UNITS` defaults to 9,000 rather than the
 full 10,000 precisely because the sweep shares the day and the reserve has to survive a
-retry. That is ~140k/year, against a prefix space that takes over a millennium to
+retry. That is ~70k/year, against a prefix space that takes over a millennium to
 exhaust.
 
 ## 3.7 Choosing k: measured, not derived

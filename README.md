@@ -27,9 +27,9 @@ it means clicking the button never touches YouTube's API.
 
 **How random is it really?** [`docs/RANDOMNESS.md`](docs/RANDOMNESS.md) states the exact
 frame and every known bias. The short version: uniform over a stated frame, not "truly
-random" — and the pool's median view count (76) and never-watched rate (2.9%), as of 2026-10-10, sit close to
-published research (~41 and ~4%), where a popularity-biased sampler would show medians in
-the thousands.
+random" — and as of 2026-10-10 the pool's median view count (76) and never-watched rate
+(2.9%) sit close to published research (~41 and ~4%), where a popularity-biased sampler
+would show medians in the thousands.
 
 ## Safety
 

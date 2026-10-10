@@ -92,30 +92,31 @@ Ordered by how much they should worry you.
    retrieved completely. We drop those buckets whole rather than take a truncated,
    relevance-ranked slice. **This does not bias the sample**: the drop depends only on
    whether the _query string_ resembles text, which is independent of the videos whose IDs
-   happen to start with it.
-   Enrichment applies the same rule. When `videos.list` omits ids that search just
-   returned, a second call is made for them. If it brings any back, or if many are still
-   missing, or if any of the three already-confirmed control ids placed at both ends of it
-   fails to come back, the responses are truncating — and a truncated response is a relevance-ranked
-   partial bucket — so every affected bucket is dropped whole. If it brings none back and
-   only a handful remain (at most 3, or 2% of the night's finds), they are treated as
-   videos that are gone from YouTube — deleted, made private, or a stale search-index entry — and only those ids are
-   dropped: they are outside the frame, and dropping their bucket-mates would not be.
-   A dropped bucket returns only when the re-harvest rotation reaches it again — in
-   practice a long wait, since re-harvest currently gets far less than its planned share
-   of each night (§4.6). `manifest.health.bucketsDroppedUnconfirmed` and `gone` record each night's
-   counts, so the rate can be watched rather than assumed.
-   The controls assume truncation keeps a contiguous run of the request in order, which
-   is the shape observed. A response that drops items from the middle, reorders and
-   drops, or omits particular ids on every call would read as deletions; that residual is
-   capped at the deletion budget — at most max(3, 2%) ids a night — and is accepted rather
-   than claimed away.
+   happen to start with it. Enrichment applies the same rule. When `videos.list` omits ids
+   that search just returned, a second call is made for them. If it brings any back, or if
+   many are still missing, or if any of the three already-confirmed control ids placed at
+   both ends of it fails to come back, the responses are truncating — and a truncated
+   response is a relevance-ranked partial bucket — so every affected bucket is dropped
+   whole. If it brings none back and only a handful remain (at most 3, or 2% of the
+   night's finds), they are treated as videos that are gone from YouTube — deleted, made
+   private, or a stale search-index entry — and only those ids are dropped: they are
+   outside the frame, and dropping their bucket-mates would not be. A dropped bucket
+   returns only when the re-harvest rotation reaches it again — about five months at the
+   current pool size, and growing (§4.6). `manifest.health.bucketsDroppedUnconfirmed` and
+   `gone` record each night's counts, so the rate can be watched rather than assumed. The
+   controls assume truncation keeps a contiguous run of the request in order, which is the
+   shape observed. A response that drops items from the middle, reorders and drops, or
+   omits particular ids on every call would read as deletions; that residual is capped at
+   the deletion budget — at most max(3, 2%) ids a night — and is accepted rather than
+   claimed away.
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
-   they did not exist for earlier draws. 30% of each night's plan is meant to re-harvest
-   older buckets to bound this. **In practice it runs far less:** fresh buckets go first,
-   unexhausted ones cost up to three searches, and the budget is usually gone after ~60
-   buckets — so re-harvest has been getting 0–4 of its 26 planned buckets a night. Until
-   that is fixed, this bias is larger than designed.
+   they did not exist for earlier draws. 30% of each night's buckets re-harvest older ones
+   to bound this, cycling through everything drawn so far — one full rotation takes about
+   five months at ~3,000 buckets drawn, and lengthens as the pool grows, so the bias is
+   bounded but not small. Until October 2026 the bound was much weaker than designed:
+   fresh buckets ran first and used up the budget, leaving re-harvest 0–4 of its 26
+   planned buckets a night. The plan now interleaves the two, so re-harvest gets its
+   share. Videos harvested before that fix are the ones most affected.
 7. **Safety filtering (on by default).** The default view hides age-restricted and
    non-embeddable videos; the footer toggle turns both off. Three exclusions are **not**
    covered by the toggle and

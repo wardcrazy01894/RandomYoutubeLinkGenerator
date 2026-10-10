@@ -169,20 +169,28 @@ const reharvestCount = Math.min(
 )
 freshCount = affordable - reharvestCount
 
-const plan = []
+const freshPlan = []
 for (let i = 0; i < freshCount && state.counter + i < PREFIX_SPACE; i++) {
-  plan.push({ n: state.counter + i, fresh: true })
+  freshPlan.push({ n: state.counter + i, fresh: true })
 }
+const reharvestPlan = []
 for (let i = 0; i < reharvestCount; i++) {
-  plan.push({
+  reharvestPlan.push({
     n: (state.reharvestCursor + i) % Math.max(state.counter, 1),
     fresh: false,
   })
 }
 // `affordable` sizes a bucket at ONE page, which is what the large majority cost. The
-// loop needs BUCKET_RESERVE free to start one, so the last few planned entries routinely
-// go unrun; that is harmless, they are simply re-planned next run. Sizing the plan at the
-// reserve instead would leave three quarters of the budget unspent every night.
+// loop needs BUCKET_RESERVE free to start one, and an unexhausted bucket costs MAX_PAGES,
+// so the budget routinely runs out ~20 entries before the plan does.
+//
+// So the two kinds are INTERLEAVED in their planned ratio rather than run fresh-first.
+// Fresh-first meant the entries left unrun every night were always the re-harvest ones:
+// from late September 2026 re-harvest got 0-4 of its 26 planned buckets a night, and the
+// recency mitigation (DESIGN §3.3.5) was effectively off. Interleaving keeps the ratio
+// whenever the run stops. It changes neither cursor's rules: fresh entries stay in counter
+// order (the contiguity rule still holds), and re-harvest entries stay in cursor order.
+const plan = interleave(freshPlan, reharvestPlan)
 console.log(
   `plan: ${freshCount} fresh + ${reharvestCount} re-harvest buckets ` +
     `(${remaining()} units, ${BUCKET_RESERVE} reserved per bucket started)`,
@@ -598,6 +606,23 @@ function runShape() {
     yieldAll: yieldPer,
     ...enrichShape,
   }
+}
+
+/**
+ * Merge two lists, preserving each one's order, so that every prefix of the result holds
+ * them in (as nearly as possible) the same ratio as the whole. Fresh goes first on ties.
+ */
+function interleave(a, b) {
+  const out = []
+  let i = 0
+  let j = 0
+  while (i < a.length || j < b.length) {
+    // Take from `a` while it is at or behind its share of what has been emitted so far.
+    const takeA =
+      j >= b.length || (i < a.length && i * b.length <= j * a.length)
+    out.push(takeA ? a[i++] : b[j++])
+  }
+  return out
 }
 
 function pctOf(n, d) {

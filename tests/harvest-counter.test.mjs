@@ -353,12 +353,14 @@ describe('baseline escape hatch and truncation', () => {
         totalBuckets: 400,
       }),
     )
-    // FAIL_AT 5 leaves four fresh buckets completed, so this is truncated-but-HEALTHY
-    // rather than a total fresh-plan failure (which has its own alarm). Yield clears the
-    // gate, so this is the case that would otherwise walk the baseline down under 'ok'.
+    // The plan interleaves fresh and re-harvest (F R F F R F ...), so search 6 is the
+    // fourth fresh bucket: three fresh buckets complete first, making this
+    // truncated-but-HEALTHY rather than a total fresh-plan failure (which has its own
+    // alarm). Yield clears the gate, so this is the case that would otherwise walk the
+    // baseline down under 'ok'.
     const r = run({
       HARVEST_UNITS: '9000',
-      STUB_FAIL_AT: '5',
+      STUB_FAIL_AT: '6',
       STUB_PER_BUCKET: '3',
     })
     expect(r.code, r.out).toBe(0)
@@ -740,5 +742,46 @@ describe('what enters the pool', () => {
     expect(manifest().health.status).toBe('enrich-collapsed')
     expect(state().counter).toBe(0)
     expect(pooled()).toEqual([])
+  })
+})
+
+// Fresh-first planning meant the entries left unrun when the budget ran short were always
+// the re-harvest ones — 0-4 of 26 a night in production, so the recency mitigation was
+// effectively off. Interleaving must give re-harvest its share of whatever does run.
+describe('re-harvest share', () => {
+  it('runs re-harvest buckets in proportion even when the run stops early', () => {
+    writeFileSync(
+      join(pool, 'state.json'),
+      JSON.stringify({
+        counter: 400,
+        reharvestCursor: 0,
+        sweeps: 0,
+        totalBuckets: 400,
+      }),
+    )
+    // Stops after 10 searches; fresh-first would have spent all 10 on fresh buckets.
+    const r = run({ HARVEST_UNITS: '9000', STUB_QUOTA_AT: '11' })
+    const h = manifest().health
+    expect(h.freshAttempted + h.reharvestAttempted, r.out).toBe(10)
+    expect(h.reharvestAttempted).toBeGreaterThanOrEqual(2)
+    expect(h.reharvestAttempted).toBeLessThanOrEqual(4)
+  })
+
+  it('keeps fresh buckets in counter order, so the contiguity rule still holds', () => {
+    writeFileSync(
+      join(pool, 'state.json'),
+      JSON.stringify({
+        counter: 400,
+        reharvestCursor: 0,
+        sweeps: 0,
+        totalBuckets: 400,
+      }),
+    )
+    const r = run({ HARVEST_UNITS: '3000' })
+    expect(r.code, r.out).toBe(0)
+    const s = state()
+    expect(s.counter).toBeGreaterThan(400)
+    assertNoGaps(400, s.counter)
+    expect(s.reharvestCursor).toBeGreaterThan(0)
   })
 })
