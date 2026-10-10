@@ -197,13 +197,19 @@ something the harvester does not understand — empty `items`, or a changed shap
 `privacyStatus` or `publishedAt`. Nothing was committed and the counter did not move.
 Look at a raw `videos.list` response for one of the logged buckets before changing code.
 
-### "N found ids were missing from videos.list … Dropping K buckets whole"
+### "N found ids were missing from videos.list …"
 
-A warning, not a failure. Search returned those ids but `videos.list` omitted them even on
-a second call, so their buckets were dropped whole rather than kept partial; they return
-on re-harvest. A handful is normal (videos deleted between the two calls). Dozens in one
-night is the 2026-10-01 truncation shape — check the next nights' counts in
-`manifest.health.bucketsDroppedUnconfirmed`.
+A warning, not a failure. Search returned those ids but `videos.list` omitted them, so a
+second call was made. The line then says one of two things:
+
+- **"Treating the N still missing as deleted or private"** — nothing came back and at
+  most max(3, 2% of found) remain. Those videos went away between the two calls; only
+  those ids are dropped. Routine.
+- **"Responses look truncated: dropping K buckets whole"** — some came back on the second
+  call, or too many are still missing. That is the 2026-10-01 truncation shape, so the
+  affected buckets are dropped whole rather than kept partial; they return on re-harvest,
+  months later. One night is tolerable. Several nights running, check
+  `manifest.health.bucketsDroppedUnconfirmed` and what `videos.list` is returning.
 
 ### "Harvester health: re-validation sweep crashed"
 

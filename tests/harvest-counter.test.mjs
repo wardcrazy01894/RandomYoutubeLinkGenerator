@@ -44,6 +44,10 @@ const perBucket = Number(process.env.STUB_PER_BUCKET ?? 2)
 // Bucket-shaped knobs, keyed on the k-th DISTINCT bucket queried (1-based).
 const unexhaustedAt = Number(process.env.STUB_UNEXHAUSTED_AT ?? 0)
 const goneAt = Number(process.env.STUB_META_GONE_AT ?? 0)
+// How many of that bucket's members are gone, counted from the END (default: all).
+const goneCount = Number(process.env.STUB_META_GONE_COUNT ?? Infinity)
+const metaQuotaOnCall = Number(process.env.STUB_META_QUOTA_ON_CALL ?? 0)
+const metaExtra = process.env.STUB_META_EXTRA === '1'
 const missingOnce = Number(process.env.STUB_META_MISSING_ONCE ?? 0)
 const metaEmpty = process.env.STUB_META_EMPTY === '1'
 const nonPublic = process.env.STUB_META_NONPUBLIC === '1'
@@ -84,12 +88,21 @@ const bucketOf = (id) => id.slice(0, id.lastIndexOf('-'))
 export async function videosMeta(key, ids) {
   if (quotaGone) throw new QuotaExceeded('stub quota (still exhausted)')
   metaCalls++
+  if (metaQuotaOnCall && metaCalls === metaQuotaOnCall) {
+    quotaGone = true
+    throw new QuotaExceeded('stub quota on videos.list')
+  }
   if (metaEmpty) return []
   let served = ids
-  // Permanently absent: every member of the k-th bucket, on every call.
-  if (goneAt) served = served.filter((id) => bucketOf(id) !== buckets[goneAt - 1])
+  // Permanently absent, on every call: the last goneCount members of the k-th bucket.
+  if (goneAt) {
+    const members = ids.filter((id) => bucketOf(id) === buckets[goneAt - 1]).sort()
+    const dead = new Set(members.slice(Math.max(0, members.length - goneCount)))
+    served = served.filter((id) => !dead.has(id))
+  }
   // Truncated FIRST response only (the 2026-10-01 shape); a second call returns them.
   if (missingOnce && metaCalls === 1) served = served.slice(0, served.length - missingOnce)
+  if (metaExtra) served = [...served, 'zzzzzzzzzzz']
   return served.map((id) => ({
     id, title: 't', publishedAt: '2020-01-01T00:00:00Z',
     embeddable: true,
@@ -455,6 +468,8 @@ describe('escape hatch cannot be turned into a silencer', () => {
     })
     expect(r.code, r.out).toBe(0)
     expect(manifest().health.status).toBe('ok-quota-capped')
+    // Nothing was found, so nothing needed enriching: a clean stop, no bucket counted.
+    expect(state().counter).toBe(0)
   })
 })
 
@@ -526,20 +541,81 @@ describe('what enters the pool', () => {
     const r = run({ HARVEST_UNITS: '1200', STUB_META_MISSING_ONCE: '2' })
     expect(r.code, r.out).toBe(0)
     expect(pooled()).toHaveLength(queried().length * 2)
-    expect(r.out).toMatch(/2 came back on a second call\. Dropping 0 buckets/)
+    expect(r.out).toMatch(/2 came back on a second call/)
+    expect(manifest().health.bucketsDroppedUnconfirmed).toBe(0)
     expect(manifest().health.revivedOnRetry).toBe(2)
   })
 
-  it('drops the whole bucket of an id still missing after the retry', () => {
-    const r = run({ HARVEST_UNITS: '1200', STUB_META_GONE_AT: '1' })
+  // A handful missing on BOTH calls, with nothing revived, are deletions: only those ids
+  // go. Dropping the bucket would keep the siblings out for a whole re-harvest rotation.
+  it('drops just a deleted id, keeping its bucket-mates, when nothing suggests truncation', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '1',
+    })
     expect(r.code, r.out).toBe(0)
-    const [first, ...rest] = queried()
+    const [first] = queried()
     const ids = pooled()
-    expect(ids.filter((id) => id.startsWith(`${first}-`))).toEqual([])
-    expect(ids).toHaveLength(rest.length * 2)
+    expect(ids).toContain(`${first}-aaaaa`)
+    expect(ids).not.toContain(`${first}-bbbbb`)
     const h = manifest().health
-    expect(h.bucketsDroppedUnconfirmed).toBe(1)
-    expect(h.inDroppedBuckets).toBe(2)
+    expect(h.gone).toBe(1)
+    expect(h.bucketsDroppedUnconfirmed).toBe(0)
+  })
+
+  // The non-negotiable: once responses are known to truncate, a bucket with ANY member
+  // unconfirmed is dropped whole. The sibling assertion is what pins it — a bucket whose
+  // every member is missing looks the same whether it was dropped whole or id by id.
+  it('drops the whole bucket when the retry shows responses are truncating', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '1',
+      STUB_META_MISSING_ONCE: '2',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    expect(pooled(), 'a partial bucket must never be kept').not.toContain(
+      `${first}-aaaaa`,
+    )
+    expect(manifest().health.bucketsDroppedUnconfirmed).toBe(1)
+    expect(r.out).toMatch(/Responses look truncated/)
+  })
+
+  it('treats too many still-missing ids as truncation even if none were revived', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_PER_BUCKET: '6',
+      STUB_META_GONE_AT: '1',
+      STUB_META_GONE_COUNT: '4',
+    })
+    expect(r.code, r.out).toBe(0)
+    const [first] = queried()
+    const ids = pooled()
+    expect(ids).not.toContain(`${first}-aaaaa`)
+    expect(ids).not.toContain(`${first}-bbbbb`)
+    expect(manifest().health.bucketsDroppedUnconfirmed).toBe(1)
+  })
+
+  it('never appends an id videos.list returned without being asked for', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_EXTRA: '1' })
+    expect(r.code, r.out).toBe(0)
+    expect(pooled()).not.toContain('zzzzzzzzzzz')
+    expect(pooled()).toHaveLength(queried().length * 2)
+  })
+
+  it('commits nothing when quota runs out on the confirming call', () => {
+    const r = run({
+      HARVEST_UNITS: '1200',
+      STUB_META_MISSING_ONCE: '2',
+      STUB_META_QUOTA_ON_CALL: '2',
+    })
+    expect(r.code, r.out).toBe(1)
+    expect(r.out).toMatch(/quota ran out while confirming/)
+    expect(manifest().health.status).toBe('quota-before-enrich')
+    expect(state().counter).toBe(0)
+    expect(pooled()).toEqual([])
   })
 
   it('reports non-public and too-fresh separately, and they sum to what was found', () => {
@@ -548,7 +624,7 @@ describe('what enters the pool', () => {
     const h = manifest().health
     expect(h.nonPublic).toBe(queried().length)
     expect(
-      h.appended + h.nonPublic + h.heldBackFresh + h.inDroppedBuckets,
+      h.appended + h.nonPublic + h.heldBackFresh + h.inDroppedBuckets + h.gone,
     ).toBe(h.found)
     expect(r.out).toMatch(new RegExp(`${h.nonPublic} non-public`))
   })

@@ -128,11 +128,14 @@ collides with thousands of title and description matches. That is a property of 
 string_, not of the videos whose IDs begin with it — those are random with respect to it.
 So the drop costs ~17% of yield without skewing what survives.
 
-The same whole-bucket rule applies at enrichment. An id that search returned but
-`videos.list` omits — even on a confirming second call, the same check `revalidate.mjs`
-uses since the 2026-10-01 truncation incident — drops its entire bucket, which is counted
-in `manifest.health.bucketsDroppedUnconfirmed` and returns on re-harvest. See
-RANDOMNESS.md ("Unexhaustible buckets") for why that is close to, but not exactly, independent of the videos.
+The same whole-bucket rule applies at enrichment. Ids that search returned but
+`videos.list` omits get a confirming second call, as `revalidate.mjs` has done since the
+2026-10-01 truncation incident. If that call revives any, or more than max(3, 2%) of the
+found ids are still missing, responses are truncating and each affected bucket is dropped
+whole (`manifest.health.bucketsDroppedUnconfirmed`); it returns on re-harvest. Otherwise
+the few still missing are taken as deleted or made private and dropped individually
+(`gone`), since dropping their bucket-mates for a re-harvest rotation would cost far more
+than it protects. See RANDOMNESS.md ("Unexhaustible buckets").
 
 #### 3.3.4 Recall — measured, and it is high
 
@@ -345,7 +348,8 @@ occupancy is a Poisson-like draw around ~5 crossed with case-folding multiplicit
 
 Fatal, run-level assertions in `harvest.mjs`:
 
-- **API error taxonomy** — `quotaExceeded` is expected and exits 0 cleanly; `keyInvalid`,
+- **API error taxonomy** — `quotaExceeded` exits 0 only when nothing was found yet,
+  otherwise fails as `quota-before-enrich` (below); `keyInvalid`,
   `accessNotConfigured`, and 403s are fatal and distinct.
 - **Yield gate** — run-level videos/bucket below half the rolling baseline exits non-zero.
 - **Exhaustion accounting** — buckets that cannot be proven exhausted are dropped and

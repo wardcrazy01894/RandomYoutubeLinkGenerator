@@ -14,7 +14,8 @@ export class ApiKeyError extends Error {}
 
 /**
  * Errors are split into three classes because they need opposite handling:
- *   - quotaExceeded  -> expected daily; the run stops cleanly and exits 0
+ *   - quotaExceeded  -> the day's quota is gone; the caller decides (harvest.mjs exits 0
+ *                       only if nothing was found yet, and fails otherwise)
  *   - key/access     -> fatal misconfiguration; must page a human
  *   - everything else-> transient; retried with backoff
  */

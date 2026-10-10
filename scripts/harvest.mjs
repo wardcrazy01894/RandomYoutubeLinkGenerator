@@ -54,6 +54,11 @@ const MIN_UPLOAD_AGE_DAYS = 30
 const PACING_MS = envNum(process.env.HARVEST_PACING_MS, 350) // per-minute rate limit
 const MAX_PAGES = 3 // a k=5 bucket needing >150 results is anomalous; drop it
 const YIELD_FLOOR_RATIO = 0.5 // run-level yield below half baseline is fatal
+// How many ids missing from videos.list on BOTH calls are believed to be real deletions
+// rather than truncation: max(GONE_FLOOR, GONE_RATIO of found). Truncation loses dozens
+// per batch; deletions between a search and a videos.list call minutes later are rare.
+const GONE_FLOOR = 3
+const GONE_RATIO = 0.02
 // Deliberately relearn the baseline instead of being measured against the stored one.
 // Must apply to BOTH the gate and recordHealth: applying it only to the latter would
 // leave the gate failing against the old baseline and exiting before writeState, so
@@ -182,6 +187,7 @@ console.log(
 
 // --- harvest ----------------------------------------------------------------
 const found = new Map()
+const freshBuckets = new Set()
 const priorCounter = state.counter
 let bucketsDone = 0
 let unexhausted = 0
@@ -224,6 +230,7 @@ for (const { n, fresh } of plan) {
     for (const id of ids) {
       if (existingIds.has(id) || found.has(id)) continue
       found.set(id, q)
+      if (fresh) freshBuckets.add(q)
       // Counted separately: the baseline and the gate must measure FRESH buckets only.
       // Mixing in re-harvest buckets — which legitimately return nothing new — diluted
       // the number being compared against a fresh-derived threshold.
@@ -310,15 +317,26 @@ if (found.size > 0) {
 
   // Search returned these ids moments ago, so videos.list omitting one is either a
   // truncated response — the 2026-10-01 shape: HTTP 200 with 1–4 of 50 items — or a
-  // video that went private or was deleted in between. revalidate.mjs has the same
-  // problem and confirms with a second call; so does this. An id still missing after
-  // that is ambiguous, and dropping just that id would keep a bucket with a member
-  // missing for a reason we cannot see — a partial bucket (§3.3.3). So its WHOLE bucket
-  // is dropped. It is counted like an unexhausted one and comes back on re-harvest.
+  // video deleted or made private in between. The two need OPPOSITE handling:
+  //   - Truncation keeps a prefix of a batch, and `found` is in bucket-then-relevance
+  //     order, so what survives is a relevance-ranked partial bucket (§3.3.3). Those
+  //     buckets must be dropped whole.
+  //   - A genuinely gone video is simply outside the frame. Dropping just that id is
+  //     correct, and dropping its bucket would keep the siblings out for a whole
+  //     re-harvest rotation — or forever, if search keeps returning the dead id.
+  // They cannot be told apart per id, so this tells them apart per RUN, as revalidate.mjs
+  // does: a second call for the missing ids. If it revives any, responses are truncating
+  // and every still-missing id is suspect. If it revives none and only a handful remain,
+  // they are deletions. A large remainder is treated as truncation even with nothing
+  // revived, since two truncated responses in a row is the likelier story.
+  // Ids the API returns that were never requested are discarded, so `found.get` below is
+  // always defined and nothing is appended without its bucket being checked.
+  meta = meta.filter((m) => found.has(m.id))
   const got = new Set(meta.map((m) => m.id))
   const missing = [...found.keys()].filter((id) => !got.has(id))
   const droppedBuckets = new Set()
   let revived = 0
+  let gone = 0
   if (missing.length > 0) {
     let second
     try {
@@ -333,20 +351,37 @@ if (found.size > 0) {
         recordHealth('quota-before-enrich', bucketsDone, null, runShape())
         process.exit(1)
       }
+      if (err instanceof ApiKeyError) {
+        console.error(`FATAL: ${err.message}`)
+        process.exit(1)
+      }
       throw err
     }
     for (const m of second) {
-      if (got.has(m.id)) continue
+      if (got.has(m.id) || !found.has(m.id)) continue
       got.add(m.id)
       meta.push(m)
       revived++
     }
-    for (const id of missing) {
-      if (!got.has(id)) droppedBuckets.add(found.get(id))
+    const stillMissing = missing.filter((id) => !got.has(id))
+    const deletionBudget = Math.max(
+      GONE_FLOOR,
+      Math.ceil(found.size * GONE_RATIO),
+    )
+    const truncating = revived > 0 || stillMissing.length > deletionBudget
+    if (truncating) {
+      for (const id of stillMissing) droppedBuckets.add(found.get(id))
+    } else {
+      gone = stillMissing.length
     }
     console.warn(
       `${missing.length} found ids were missing from videos.list; ${revived} came back on a ` +
-        `second call. Dropping ${droppedBuckets.size} buckets whole for the rest.`,
+        `second call. ` +
+        (truncating
+          ? `Responses look truncated: dropping ${droppedBuckets.size} buckets whole for the ` +
+            `${stillMissing.length} still missing.`
+          : `Treating the ${gone} still missing as deleted or private (at most ` +
+            `${deletionBudget} allowed) and dropping just those ids.`),
     )
   }
   const inDroppedBucket = (id) => droppedBuckets.has(found.get(id))
@@ -377,19 +412,31 @@ if (found.size > 0) {
   // Every found id lands in exactly one of these, so they sum to found.size. The old
   // line reported meta.length - records.length as "non-public dropped", which lumped
   // too-fresh in with non-public and never counted ids missing from the response at all.
+  // Split by bucket kind for the enrichment gate's margin: re-harvest buckets turn up
+  // mostly recent uploads, which the upload-age quarantine holds back, so a run made
+  // mostly of re-harvest buckets keeps a smaller share for a legitimate reason.
+  const isFreshId = (id) => freshBuckets.has(found.get(id))
+  const foundFresh = [...found.keys()].filter(isFreshId).length
+  const appendedFresh = records.filter((r) => isFreshId(r.id)).length
   enrichShape = {
     found: found.size,
+    foundFresh,
+    appendedFresh,
     appended: records.length,
     heldBackFresh: tooFresh,
     nonPublic,
-    inDroppedBuckets: found.size - kept.length,
+    inDroppedBuckets: [...found.values()].filter((q) => droppedBuckets.has(q))
+      .length,
+    gone,
     bucketsDroppedUnconfirmed: droppedBuckets.size,
     revivedOnRetry: revived,
   }
   console.log(
     `enriched ${found.size} found ids: ${records.length} appended, ${tooFresh} held back ` +
-      `as too fresh, ${nonPublic} non-public, ${found.size - kept.length} in ` +
-      `${droppedBuckets.size} dropped buckets`,
+      `as too fresh, ${nonPublic} non-public, ${gone} gone, ` +
+      `${enrichShape.inDroppedBuckets} in ${droppedBuckets.size} dropped buckets ` +
+      `(kept ${pctOf(appendedFresh, foundFresh)}% from fresh buckets, ` +
+      `${pctOf(records.length - appendedFresh, found.size - foundFresh)}% from re-harvest)`,
   )
 }
 
@@ -510,6 +557,10 @@ function runShape() {
     yieldAll: yieldPer,
     ...enrichShape,
   }
+}
+
+function pctOf(n, d) {
+  return d > 0 ? Math.round((n / d) * 1000) / 10 : null
 }
 
 function pct(rows, pred) {

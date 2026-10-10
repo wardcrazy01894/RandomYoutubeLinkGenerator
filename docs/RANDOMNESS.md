@@ -85,13 +85,17 @@ Ordered by how much they should worry you.
    relevance-ranked slice. **This does not bias the sample**: the drop depends only on
    whether the _query string_ resembles text, which is independent of the videos whose IDs
    happen to start with it.
-   A bucket is also dropped whole when one of its ids comes back from search but is
-   missing from `videos.list` even on a second call — either a truncated response or a
-   video that went private or was deleted in the minutes between the two calls. Keeping
-   the rest would be a partial bucket. Truncation lands on buckets by their position in
-   the batch, independent of the videos; a just-deleted member does tie the drop to the
-   bucket's contents, but only until re-harvest draws the bucket again without it. Each
-   run records how many buckets this cost (`manifest.health.bucketsDroppedUnconfirmed`).
+   Enrichment applies the same rule. When `videos.list` omits ids that search just
+   returned, a second call is made for them. If it brings any back, or if many are still
+   missing, the responses are truncating — and a truncated response is a relevance-ranked
+   partial bucket — so every affected bucket is dropped whole. If it brings none back and
+   only a handful remain (at most 3, or 2% of the night's finds), they are treated as
+   videos deleted or made private in the minutes between the calls, and only those ids are
+   dropped: they are outside the frame, and dropping their bucket-mates would not be.
+   A dropped bucket returns only when the re-harvest rotation reaches it again, which at
+   ~26 re-harvest buckets a night over ~3,000 drawn is roughly four months and grows with
+   the pool. `manifest.health.bucketsDroppedUnconfirmed` and `gone` record each night's
+   counts, so the rate can be watched rather than assumed.
 6. **Recency.** A pool built up over time under-represents videos uploaded recently, since
    they did not exist for earlier draws. A rolling fraction of each night's budget
    re-harvests older buckets to bound this.
