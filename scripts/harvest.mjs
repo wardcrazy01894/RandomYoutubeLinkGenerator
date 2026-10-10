@@ -12,6 +12,7 @@ import {
   searchPage,
   videosMeta,
   COST,
+  VIDEOS_CHUNK,
   QuotaExceeded,
   ApiKeyError,
   sleep,
@@ -333,11 +334,17 @@ if (found.size > 0) {
   // revived, since two truncated responses in a row is the likelier story.
   //
   // "Revives none" alone cannot prove the second response was whole: a truncation that
-  // drops the TAIL of every request loses the same ids twice, and they would pass as
+  // drops the same end of every request loses the same ids twice, and they would pass as
   // deletions — a relevance-ranked partial bucket. So the confirming call carries
-  // CONTROLS after the missing ids: ids the first call already returned, which must come
-  // back again. Any control absent means that response was truncated too. The request
-  // must also fit in one videos.list chunk, or the controls only vouch for the last one.
+  // CONTROLS at both ends of the request: ids the first call already returned, which must
+  // come back again. Any control absent means that response was truncated too. The
+  // request must also fit in one videos.list chunk, or the controls only vouch for one.
+  //
+  // What the controls do NOT catch, accepted as residual and stated in RANDOMNESS.md: a
+  // response that loses items from the MIDDLE, or returns items out of request order and
+  // loses some, or omits particular ids on every call (a backend shard down). The
+  // observed 2026-10-01 shape kept a contiguous prefix in order, which this does catch;
+  // any of the others can pass at most max(GONE_FLOOR, GONE_RATIO) ids a night as gone.
   //
   // Ids the API returns that were never requested are discarded, so `found.get` below is
   // always defined and nothing is appended without its bucket being checked. Duplicates
@@ -350,14 +357,19 @@ if (found.size > 0) {
   const got = new Set(byId.keys())
   const missing = [...found.keys()].filter((id) => !got.has(id))
   const droppedBuckets = new Set()
-  let enrichConfirm = {}
+  // Always present, so monitoring reads a stable shape: null when nothing was missing.
+  let enrichConfirm = { controlsLost: null, conclusive: null }
   let revived = 0
   let gone = 0
   if (missing.length > 0) {
     const controls = [...got].slice(0, CONTROL_COUNT)
     let second
     try {
-      second = await enrich([...missing, ...controls])
+      // One control first, the rest last, so truncation from either end of the
+      // request loses a control before it can lose the missing ids twice.
+      second = await enrich(
+        [controls[0], ...missing, ...controls.slice(1)].filter(Boolean),
+      )
     } catch (err) {
       // Same reasoning as above, but by now nothing is ambiguous about the quota.
       if (err instanceof QuotaExceeded) {
@@ -390,7 +402,7 @@ if (found.size > 0) {
     const conclusive =
       controls.length === CONTROL_COUNT &&
       controlsLost === 0 &&
-      missing.length + controls.length <= 50
+      missing.length + controls.length <= VIDEOS_CHUNK
     const truncating =
       !conclusive || revived > 0 || stillMissing.length > deletionBudget
     if (truncating) {

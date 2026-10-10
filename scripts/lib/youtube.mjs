@@ -8,6 +8,8 @@ const API = 'https://www.googleapis.com/youtube/v3'
 
 /** Unit costs, from the published quota table. */
 export const COST = { search: 100, videos: 1 }
+/** videos.list accepts at most this many ids per request. */
+export const VIDEOS_CHUNK = 50
 
 export class QuotaExceeded extends Error {}
 export class ApiKeyError extends Error {}
@@ -119,8 +121,8 @@ export async function searchPage(key, q, pageToken) {
  */
 export async function videosMeta(key, ids) {
   const out = []
-  for (let i = 0; i < ids.length; i += 50) {
-    const chunk = ids.slice(i, i + 50)
+  for (let i = 0; i < ids.length; i += VIDEOS_CHUNK) {
+    const chunk = ids.slice(i, i + VIDEOS_CHUNK)
     const data = await call(
       'videos',
       { part: 'snippet,status,contentDetails,statistics', id: chunk.join(',') },

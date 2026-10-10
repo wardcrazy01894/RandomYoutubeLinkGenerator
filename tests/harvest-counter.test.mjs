@@ -33,6 +33,7 @@ let dir, pool, log, canaryLog
 const STUB = `
 import { appendFileSync } from 'node:fs'
 export const COST = { search: 100, videos: 1 }
+export const VIDEOS_CHUNK = 50
 export class QuotaExceeded extends Error {}
 export class ApiKeyError extends Error {}
 export const sleep = () => Promise.resolve()
@@ -52,6 +53,9 @@ const metaExtra = process.env.STUB_META_EXTRA === '1'
 // hits the same ids on the confirming call as on the first.
 const tailDrop = Number(process.env.STUB_META_TAIL_DROP ?? 0)
 const tailLost = new Set()
+// Every call loses the first N items of the request, by POSITION — so an id placed first
+// in the confirming call is lost again, exactly as it was in the first call.
+const headDrop = Number(process.env.STUB_META_HEAD_DROP ?? 0)
 const metaDup = process.env.STUB_META_DUP === '1'
 const missingOnce = Number(process.env.STUB_META_MISSING_ONCE ?? 0)
 const metaEmpty = process.env.STUB_META_EMPTY === '1'
@@ -112,6 +116,7 @@ export async function videosMeta(key, ids) {
     for (const id of served.slice(Math.max(0, served.length - tailDrop))) tailLost.add(id)
     served = served.slice(0, Math.max(0, served.length - tailDrop))
   }
+  if (headDrop) served = served.slice(headDrop)
   if (metaDup && served.length > 0) served = [served[0], ...served]
   if (metaExtra) served = [...served, 'zzzzzzzzzzz']
   return served.map((id) => ({
@@ -622,6 +627,24 @@ describe('what enters the pool', () => {
     const h = manifest().health
     expect(h.gone).toBe(0)
     expect(h.bucketsDroppedUnconfirmed).toBe(1)
+    expect(h.controlsLost).toBeGreaterThan(0)
+  })
+
+  // With controls only at the end, the missing id would sit first in the confirming call,
+  // be lost again, and pass as a deletion — keeping its bucket-mate.
+  it('catches a truncation that drops the head of every request', () => {
+    const r = run({ HARVEST_UNITS: '1200', STUB_META_HEAD_DROP: '1' })
+    expect(r.code, r.out).toBe(0)
+    const ids = new Set(pooled())
+    for (const q of queried()) {
+      const present = [`${q}-aaaaa`, `${q}-bbbbb`].filter((id) => ids.has(id))
+      expect(
+        present.length === 0 || present.length === 2,
+        `bucket ${q} kept partial: ${present}`,
+      ).toBe(true)
+    }
+    const h = manifest().health
+    expect(h.gone).toBe(0)
     expect(h.controlsLost).toBeGreaterThan(0)
   })
 
