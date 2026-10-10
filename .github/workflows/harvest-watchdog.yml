@@ -6,16 +6,23 @@ name: harvest-watchdog
 # noticed. The site's banner cannot catch it either — it only sees main's pool, which
 # moves on promotion, not on harvest.
 #
-# This checks the age of harvest.yml's newest run, of any outcome (failures alarm
-# themselves) and any trigger (a manual dispatch counts as the harvester being alive).
+# This checks the age of harvest.yml's newest LIVE run on main: one still queued or
+# running, or one that finished as success or failure. Those are the outcomes where the
+# harvest job actually ran, so a failure has already raised its own alarm. A
+# startup_failure (no job ever starts) or a cancellation (including the 60-minute job
+# timeout) skips harvest.yml's `if: failure()` step, so those do NOT count as alive — a
+# harvester that dies that way every night would otherwise look healthy here. Any trigger
+# counts, so a manual dispatch on main proves the harvester is alive.
 #
 # Limits, stated rather than hidden:
 # - It runs on the same GitHub scheduler. A platform-wide scheduler outage silences it
 #   too; only an external heartbeat could catch that.
 # - The 36h threshold catches a gap of two nights reliably. A single skipped night can
-#   pass unnoticed when the previous run started late, because scheduled runs here have
-#   started anywhere from 08:17 to ~20:15 UTC. A tighter window would page on every
-#   late start instead.
+#   pass unnoticed when the previous run started late: scheduled runs here have started
+#   anywhere from 08:46 to 20:11 UTC, and the widest gap between two consecutive healthy
+#   runs so far is 34.0h. A tighter window would page on ordinary late starts.
+# - If the GitHub API call itself throws, the run goes red with no issue filed, and that
+#   red run notifies only the account that last edited this cron.
 
 on:
   schedule:
@@ -25,6 +32,11 @@ on:
 permissions:
   actions: read # list harvest.yml's runs
   issues: write # raise the alarm
+
+# A dispatch overlapping the cron run would otherwise file the issue twice.
+concurrency:
+  group: harvest-watchdog
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -36,46 +48,53 @@ jobs:
         with:
           script: |
             const MAX_AGE_HOURS = 36
+            const TITLE = 'Harvester health: no harvest run has started'
             const { owner, repo } = context.repo
             const runs = await github.rest.actions.listWorkflowRuns({
-              owner, repo, workflow_id: 'harvest.yml', per_page: 1,
+              owner, repo, workflow_id: 'harvest.yml', branch: 'main', per_page: 20,
             })
-            const latest = runs.data.workflow_runs[0]
+            const alive = (r) =>
+              r.status !== 'completed' || r.conclusion === 'success' || r.conclusion === 'failure'
+            // Newest first, so the first live run is the newest one.
+            const latest = runs.data.workflow_runs.find(alive)
             const ageHours = latest
               ? (Date.now() - new Date(latest.created_at).getTime()) / 3600_000
               : Infinity
             console.log(
               latest
-                ? `newest harvest run: ${latest.html_url} (${latest.event}, created ${latest.created_at}, ${ageHours.toFixed(1)}h ago)`
-                : 'harvest.yml has no runs at all',
+                ? `newest live harvest run: ${latest.html_url} (${latest.event}, ${latest.status}/${latest.conclusion}, created ${latest.created_at}, ${ageHours.toFixed(1)}h ago)`
+                : 'none of the last 20 harvest.yml runs on main actually ran its job',
             )
             if (ageHours <= MAX_AGE_HOURS) return
 
             const body = [
               latest
-                ? `No harvest run has started in ${ageHours.toFixed(0)} hours (newest: ${latest.html_url}, created ${latest.created_at}).`
-                : `harvest.yml has never run.`,
+                ? `No harvest run has started its job in ${ageHours.toFixed(0)} hours (newest that did: ${latest.html_url}, created ${latest.created_at}).`
+                : `None of the last 20 harvest.yml runs on main started its job (all absent, startup_failure, or cancelled).`,
               ``,
               `A run that never starts files no failure issue of its own, which is why this`,
               `watchdog exists. Check that the workflow is still enabled`,
               `(\`gh workflow list --all\`) and that \`main\` still has the \`schedule\` trigger.`,
-              `If both look right, GitHub's scheduler is dropping the runs: dispatch one by hand`,
+              `Runs that exist but ended as startup_failure or cancelled count as dead: open one`,
+              `to see why. If no runs exist at all, GitHub's scheduler is dropping them: dispatch one by hand`,
               `(\`gh workflow run harvest.yml\`) and see docs/OPERATIONS.md.`,
               ``,
               `Watchdog run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
             ].join('\n')
-            const existing = await github.rest.issues.listForRepo({
+            // Matched on this watchdog's own title. A routine "re-validation refused a
+            // window" issue is often left open, and burying this alarm as a comment under
+            // that title would hide it.
+            const open = await github.rest.issues.listForRepo({
               owner, repo, state: 'open', labels: 'harvester-health',
             })
-            if (existing.data.length > 0) {
+            const mine = open.data.find((i) => i.title === TITLE)
+            if (mine) {
               await github.rest.issues.createComment({
-                owner, repo, issue_number: existing.data[0].number, body,
+                owner, repo, issue_number: mine.number, body,
               })
             } else {
               await github.rest.issues.create({
-                owner, repo,
-                title: 'Harvester health: no harvest run has started',
-                body, labels: ['harvester-health'],
+                owner, repo, title: TITLE, body, labels: ['harvester-health'],
               })
             }
             core.setFailed(`no harvest run in ${MAX_AGE_HOURS}h`)

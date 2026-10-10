@@ -349,10 +349,12 @@ Fatal, run-level assertions in `harvest.mjs`:
 
 Alerting: a red Actions run on an unwatched repo is invisible, so failures open/update a
 GitHub issue (which emails). A run that never starts cannot alarm itself, so
-`harvest-watchdog.yml` files the same issue when no harvest run has started in 36 hours.
+`harvest-watchdog.yml` files its own issue when no harvest run on main has actually run its
+job in 36 hours.
 `manifest.health` carries `{lastRunUtc, buckets, yield, status}`. The site shows a "pool
 last refreshed N days ago" banner past 14 days; it reads main's pool, which moves only on
-promotion, so it measures publication age, not harvester liveness.
+promotion, so it measures the age of the newest harvest main has published, not harvester
+liveness.
 
 ## 5. Safety
 

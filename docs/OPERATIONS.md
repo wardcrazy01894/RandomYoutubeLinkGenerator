@@ -204,15 +204,19 @@ and the sweep cursor are where they were, and the same prefixes are drawn again.
 
 ## "Harvester health: no harvest run has started"
 
-`harvest-watchdog.yml` filed this because `harvest.yml` has no run of any kind in the last
-36 hours. A run that never starts files no failure issue of its own: on 2026-10-08 and
-10-09 GitHub's scheduler simply created no run, after 51 consecutive nights, with the
-workflow active and nothing in the repo changed.
+`harvest-watchdog.yml` filed this because no `harvest.yml` run on `main` in the last 36
+hours actually ran its job (still running, or finished as success or failure). A run that
+never starts, ends as `startup_failure`, or is cancelled (including by the 60-minute
+timeout) files no failure issue of its own. On 2026-10-08 and 10-09 GitHub's scheduler
+simply created no run, after 51 consecutive nights, with the workflow active and nothing
+in the repo changed.
 
-1. `gh workflow list --all` — is `harvest` still `active`? Re-enable it if not.
-2. Is the `schedule:` trigger still in `harvest.yml` on `main`? Schedules only fire from
+1. `gh run list --workflow harvest.yml -L 5` — if recent runs exist but show
+   `startup_failure` or `cancelled`, open one: the cause is in the run, not the scheduler.
+2. `gh workflow list --all` — is `harvest` still `active`? Re-enable it if not.
+3. Is the `schedule:` trigger still in `harvest.yml` on `main`? Schedules only fire from
    the default branch.
-3. If both are fine, the scheduler dropped the runs. Dispatch one by hand
+4. If all of that is fine, the scheduler dropped the runs. Dispatch one by hand
    (`gh workflow run harvest.yml`); one successful manual run proves the workflow itself
    is healthy. Close the issue once the scheduled runs resume.
 
@@ -221,11 +225,13 @@ reliably catches two missed nights, not always one (see the header of the workfl
 
 ## The site says "this video pool was last refreshed N days ago"
 
-The banner reads `manifest.generatedAt` on `main` and appears past 14 days. Because
-`main` only changes when a promotion merges, it measures how long since the last
-**promotion**, not whether the harvester is alive — harvests landing on `pool` do not
-move it. Promote (above). If there is nothing on `pool` to promote, the harvester has
-stopped: see the two sections above.
+The banner reads `manifest.generatedAt` on `main` and appears past 14 days.
+`generatedAt` is the start time of the newest harvest run that main's pool contains, and
+main only changes when a promotion merges. So it measures how old the newest harvest in
+the last promotion is — not when the promotion happened, and not whether the harvester
+is alive now. Harvests landing on `pool` do not move it until promoted. Promote (above).
+If there is nothing on `pool` to promote, the harvester has stopped: see the two sections
+above.
 
 ## First-time setup (one-off, needs admin)
 
