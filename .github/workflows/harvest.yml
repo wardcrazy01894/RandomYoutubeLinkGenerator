@@ -35,14 +35,8 @@ permissions:
   issues: write # raise the health alarm
 
 # Never let a manual run collide with the cron and fight over the branch.
-#
-# Renamed from `harvest` on 2026-10-10. A dispatch sent while the owning account was being
-# restored from a suspension left a run GitHub reports as queued but will neither start,
-# cancel, force-cancel, nor delete (409/403), and it held the old group: every later run
-# queued behind it with zero jobs, scheduled ones included. A new group name is the only
-# lever a repo has. If it happens again, rename again and say why here.
 concurrency:
-  group: harvest-v2
+  group: harvest
   cancel-in-progress: false
 
 jobs:
