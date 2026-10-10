@@ -348,9 +348,11 @@ Fatal, run-level assertions in `harvest.mjs`:
   run. This is the single check that catches YouTube changing the tokenizer.
 
 Alerting: a red Actions run on an unwatched repo is invisible, so failures open/update a
-pinned GitHub issue (which emails). `manifest.health` carries `{lastRunUtc, buckets,
-yield, status}`, and the site shows a visible "pool last updated N days ago" banner past 3
-days. The site self-monitors rather than trusting notifications.
+GitHub issue (which emails). A run that never starts cannot alarm itself, so
+`harvest-watchdog.yml` files the same issue when no harvest run has started in 36 hours.
+`manifest.health` carries `{lastRunUtc, buckets, yield, status}`. The site shows a "pool
+last refreshed N days ago" banner past 14 days; it reads main's pool, which moves only on
+promotion, so it measures publication age, not harvester liveness.
 
 ## 5. Safety
 
@@ -448,7 +450,7 @@ Matching the house conventions, plus what review found missing:
 
 - `ci.yml` — typecheck, lint, format, build, test, gitleaks, informational audit; SHA-pinned
 - `deploy.yml` + reusable `deploy-pages.yml`; `harvest.yml` with explicit `permissions`,
-  `concurrency`, and `timeout-minutes`
+  `concurrency`, and `timeout-minutes`; `harvest-watchdog.yml` for runs that never start
 - **`.gitleaks.toml` allowlisting `data/pool/**`** — a pool of random base64url strings is
   exactly what entropy rules fire on; without this every PR goes red
 - **`.gitattributes`** marking the pool `linguist-generated -diff`, or every diff is a wall

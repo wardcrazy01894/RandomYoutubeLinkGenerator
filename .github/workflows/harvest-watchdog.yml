@@ -1,0 +1,81 @@
+name: harvest-watchdog
+
+# harvest.yml raises its own alarm when it FAILS, but a run that never starts raises
+# nothing. That happened on 2026-10-08 and 10-09: after 51 consecutive nightly runs the
+# scheduler simply created none, with the workflow active and the repo busy, and nothing
+# noticed. The site's banner cannot catch it either — it only sees main's pool, which
+# moves on promotion, not on harvest.
+#
+# This checks the age of harvest.yml's newest run, of any outcome (failures alarm
+# themselves) and any trigger (a manual dispatch counts as the harvester being alive).
+#
+# Limits, stated rather than hidden:
+# - It runs on the same GitHub scheduler. A platform-wide scheduler outage silences it
+#   too; only an external heartbeat could catch that.
+# - The 36h threshold catches a gap of two nights reliably. A single skipped night can
+#   pass unnoticed when the previous run started late, because scheduled runs here have
+#   started anywhere from 08:17 to ~20:15 UTC. A tighter window would page on every
+#   late start instead.
+
+on:
+  schedule:
+    - cron: '43 22 * * *' # after the latest start ever seen for the 08:17 harvest
+  workflow_dispatch:
+
+permissions:
+  actions: read # list harvest.yml's runs
+  issues: write # raise the alarm
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Has harvest run recently?
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const MAX_AGE_HOURS = 36
+            const { owner, repo } = context.repo
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'harvest.yml', per_page: 1,
+            })
+            const latest = runs.data.workflow_runs[0]
+            const ageHours = latest
+              ? (Date.now() - new Date(latest.created_at).getTime()) / 3600_000
+              : Infinity
+            console.log(
+              latest
+                ? `newest harvest run: ${latest.html_url} (${latest.event}, created ${latest.created_at}, ${ageHours.toFixed(1)}h ago)`
+                : 'harvest.yml has no runs at all',
+            )
+            if (ageHours <= MAX_AGE_HOURS) return
+
+            const body = [
+              latest
+                ? `No harvest run has started in ${ageHours.toFixed(0)} hours (newest: ${latest.html_url}, created ${latest.created_at}).`
+                : `harvest.yml has never run.`,
+              ``,
+              `A run that never starts files no failure issue of its own, which is why this`,
+              `watchdog exists. Check that the workflow is still enabled`,
+              `(\`gh workflow list --all\`) and that \`main\` still has the \`schedule\` trigger.`,
+              `If both look right, GitHub's scheduler is dropping the runs: dispatch one by hand`,
+              `(\`gh workflow run harvest.yml\`) and see docs/OPERATIONS.md.`,
+              ``,
+              `Watchdog run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n')
+            const existing = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'harvester-health',
+            })
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.data[0].number, body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner, repo,
+                title: 'Harvester health: no harvest run has started',
+                body, labels: ['harvester-health'],
+              })
+            }
+            core.setFailed(`no harvest run in ${MAX_AGE_HOURS}h`)
