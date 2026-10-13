@@ -1,20 +1,20 @@
 {
   "version": 1,
   "shardSize": 1000,
-  "total": 12773,
-  "servable": 12773,
-  "generatedAt": "2026-10-10T17:28:00.615Z",
+  "total": 13371,
+  "servable": 13371,
+  "generatedAt": "2026-10-13T15:56:49.711Z",
   "health": {
     "freshPlanned": 63,
-    "freshAttempted": 42,
-    "reharvestAttempted": 17,
+    "freshAttempted": 44,
+    "reharvestAttempted": 18,
     "truncated": false,
-    "yieldAll": 3.457627118644068,
-    "found": 204,
-    "foundFresh": 193,
-    "appendedFresh": 188,
-    "appended": 196,
-    "heldBackFresh": 8,
+    "yieldAll": 3.693548387096774,
+    "found": 229,
+    "foundFresh": 218,
+    "appendedFresh": 211,
+    "appended": 217,
+    "heldBackFresh": 12,
     "nonPublic": 0,
     "inDroppedBuckets": 0,
     "gone": 0,
@@ -23,32 +23,31 @@
     "controlsLost": null,
     "conclusive": null,
     "status": "ok",
-    "lastRunUtc": "2026-10-10T17:28:00.615Z",
-    "buckets": 59,
-    "yield": 4.595238095238095,
-    "baselineYield": 4.555034496866739
+    "lastRunUtc": "2026-10-13T15:56:49.711Z",
+    "buckets": 62,
+    "yield": 4.954545454545454,
+    "baselineYield": 4.580737546955655
   },
   "stats": {
     "prefixLength": 5,
     "prefixSpace": 39357381,
-    "bucketsEverDrawn": 3021,
+    "bucketsEverDrawn": 3207,
     "embeddablePct": 100,
     "ageRestrictedPct": 0.5,
     "minUploadAgeDays": 30,
     "lastSweep": {
-      "at": "2026-10-10T17:30:11.445Z",
-      "checked": 12694,
-      "removed": 12,
+      "at": "2026-10-13T15:58:52.920Z",
+      "checked": 13275,
+      "removed": 1,
       "byReason": {
-        "not-public": 3,
-        "gone": 9
+        "not-public": 1
       },
       "refused": false,
       "truncatedBatches": 0,
       "refusedBatches": 0
     },
-    "tombstoned": 91,
+    "tombstoned": 97,
     "sweepCursor": 0,
-    "sweepsCompleted": 51
+    "sweepsCompleted": 54
   }
 }
