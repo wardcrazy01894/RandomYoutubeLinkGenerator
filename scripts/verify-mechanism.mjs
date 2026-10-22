@@ -6,7 +6,7 @@
 // differently. Nothing downstream is trustworthy until this passes.
 //
 // Three things are checked:
-//   1. Dash-token retrieval  — does q="my8exz" return the video "my8EXZ-mqpQ"?
+//   1. Dash-token retrieval  — does q="7cbrv9h" return the video "7Cbrv9h-0cY"?
 //   2. Case-insensitivity    — does it work with the query in the wrong case?
 //   3. Random-prefix yield   — what is the real videos-per-bucket at PREFIX_LENGTH?
 //
@@ -17,9 +17,13 @@ import { searchPage } from './lib/youtube.mjs'
 import { prefixAt, PREFIX_SPACE, PREFIX_LENGTH } from './lib/prefix.mjs'
 import { loadKey } from './lib/env.mjs'
 
-// Real IDs observed in the wild, each with a dash-delimited leading token.
+// Real IDs observed in the wild, each with a dash-delimited leading token. Keep this
+// the same list as CANARIES in harvest.mjs. These are videos, and videos go away:
+// my8EXZ-mqpQ went private on 2026-10-22. A single MISSING here with the others FOUND
+// means that video is gone (check it with YouTube's oEmbed endpoint), not that the
+// mechanism broke — replace it, in both lists, with a public video from the pool.
 const KNOWN = [
-  { token: 'my8exz', id: 'my8EXZ-mqpQ' },
+  { token: '2s34x', id: '2s34x-mt1wk' },
   { token: '7cbrv9h', id: '7Cbrv9h-0cY' },
   { token: 'xvp3n9h', id: 'xVp3N9h-DQY' },
 ]

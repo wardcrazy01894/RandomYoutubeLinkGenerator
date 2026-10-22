@@ -20,7 +20,7 @@ you care about (views, language, topic, recency). Ours is, with the caveats in Â
 ## 1. The method
 
 YouTube's search tokenizes video IDs on the `-` character, and matches those tokens
-case-insensitively. So searching `my8exz` returns the video whose ID is `my8EXZ-mqpQ`.
+case-insensitively. So searching `7cbrv9h` returns the video whose ID is `7Cbrv9h-0cY`.
 Underscores do not split; only dashes do.
 
 We draw a random 5-character prefix, ask the API for it, and keep **only** the results

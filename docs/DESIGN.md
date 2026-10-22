@@ -56,9 +56,10 @@ and indexes the segments as case-insensitively matched tokens.
 
 | Query        | Target        | Result                                        |
 | ------------ | ------------- | --------------------------------------------- |
-| `my8exz`     | `my8EXZ-mqpQ` | found                                         |
+| `my8exz`     | `my8EXZ-mqpQ` | found (video went private 2026-10-22)         |
 | `7cbrv9h`    | `7Cbrv9h-0cY` | found                                         |
 | `xvp3n9h`    | `xVp3N9h-DQY` | found                                         |
+| `2s34x`      | `2s34x-mt1wk` | found (from the pool; added 2026-10-22)       |
 | `aw8ltyxg`   | `Aw8lTYXg_V8` | **not** found — `_` does not split            |
 | `jezlkg4agw` | `jeZLKG4agw0` | **not** found — bare prefix, no dash boundary |
 
@@ -257,7 +258,8 @@ Daily budget against 10,000 units, at the measured k=5 rate of ~5 videos/bucket:
 | Re-validation sweep (§5.3)                               | 1 / 50 IDs | 25,000    | 500    |
 | Reserve                                                  |            |           | ~590   |
 
-The search rows roughly add up to the 8,900 units the harvest gets after its 100-unit canary.
+The search rows roughly add up to the 8,900 units the harvest gets after its canary (100
+units when the first canary resolves; up to 300 if it has to fall back).
 The plan sizes buckets at one search (62 fresh + 27 re-harvest = 89), but ~13% of buckets
 are unexhausted and cost three, so ~60–67 actually run: ~44 fresh and ~19 re-harvest,
 interleaved. At ~5 members per exhausted fresh bucket that is **~200 new videos/night**,
@@ -396,7 +398,12 @@ Fatal, run-level assertions in `harvest.mjs`:
   buckets are redrawn, and exits non-zero (`quota-before-enrich`): the local budget exists
   so that this never happens, so reaching it means something else spent the quota.
 - **Mechanism canary** — a known dash-token ID must be retrievable by its own token every
-  run. This is the single check that catches YouTube changing the tokenizer.
+  run. This is the single check that catches YouTube changing the tokenizer. There are
+  three such IDs, probed in order until one resolves, because a canary is also just a
+  video: the original lone canary went private on 2026-10-22 and a night's harvest was
+  suspended for a deletion. Only every canary missing is treated as the mechanism
+  breaking; a single miss is logged, counted in the health record (`canaryMisses`), and
+  means that canary should be rotated.
 
 Alerting: a red Actions run on an unwatched repo is invisible, so failures open/update a
 GitHub issue (which emails). A run that never starts cannot alarm itself, so

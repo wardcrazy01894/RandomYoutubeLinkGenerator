@@ -181,13 +181,57 @@ jobs:
         run: |
           node -e "
             let refused = false
+            let canaryMisses = 0
             try {
-              refused = require('./public/data/pool/manifest.json').stats?.lastSweep?.refused === true
+              const m = require('./public/data/pool/manifest.json')
+              refused = m.stats?.lastSweep?.refused === true
+              canaryMisses = Number(m.health?.canaryMisses ?? 0) || 0
             } catch (e) {
               console.error('could not read the sweep result: ' + e.message)
             }
             process.stdout.write('refused=' + refused + '\n')
+            process.stdout.write('canaryMisses=' + canaryMisses + '\n')
           " >> "$GITHUB_OUTPUT"
+
+      # A dead canary video is not fatal — the run fell back to the next one — but it
+      # costs 100 units every night until someone rotates it, and a log line on a green
+      # run tells nobody. Same issue-per-title routing as the sweep report, same
+      # non-fatal construction: this must never discard the night's harvest.
+      - name: Report a dead canary video
+        if: steps.sweep.outputs.canaryMisses != '0'
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          MISSES: ${{ steps.sweep.outputs.canaryMisses }}
+        with:
+          script: |
+            const title = 'Harvester health: a canary video is gone'
+            const body = [
+              `${process.env.MISSES} canary probe(s) missed before one resolved. The harvest ran`,
+              `normally — the mechanism is fine — but a canary video is private or deleted and`,
+              `every night pays 100 units per dead canary until it is rotated.`,
+              ``,
+              `The run log names the token. Rotation steps: docs/OPERATIONS.md,`,
+              `"a canary video is gone".`,
+              ``,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n')
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'harvester-health',
+            })
+            const mine = open.data.find((i) => i.title === title)
+            if (mine) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: mine.number, body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['harvester-health'],
+              })
+            }
 
       # A CRASHED sweep is reported here too. The sweep runs under continue-on-error, and
       # harvest.mjs replaces manifest.stats wholesale, so after a crash there is no
@@ -328,12 +372,13 @@ jobs:
               ``,
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               ``,
-              `Triage: docs/OPERATIONS.md — the usual causes are a broken canary`,
-              `(YouTube changed ID tokenization), a frozen sampling frontier`,
+              `Triage: docs/OPERATIONS.md — the usual causes are every canary missing`,
+              `(YouTube changed ID tokenization — or every canary video is gone),`,
+              `a frozen sampling frontier`,
               `(no-fresh-progress), an invalid/restricted API key, a collapsed yield,`,
               `enrichment keeping under half of what search found (enrich-collapsed),`,
               `Google's quota running out before enrichment (quota-before-enrich),`,
-              `a dispatched \`units\` below 500 (too small to start a single bucket),`,
+              `a dispatched \`units\` below 700 (too small to start a single bucket),`,
               `or a GitHub 5xx on the final push to \`pool\` (the harvest itself succeeded`,
               `and nothing is corrupted; the next scheduled run redraws the same prefixes).`,
             ].join('\n')

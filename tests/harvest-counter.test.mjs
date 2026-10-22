@@ -13,7 +13,11 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { prefixAt, PREFIX_SPACE } from '../scripts/lib/prefix.mjs'
+import {
+  prefixAt,
+  PREFIX_SPACE,
+  PREFIX_LENGTH,
+} from '../scripts/lib/prefix.mjs'
 
 // The harvest loop's counting rules have been rewritten three times, and each rewrite
 // broke differently: advancing by prefixes PLANNED rather than queried; incrementing
@@ -28,6 +32,14 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const KEY = 'RandomYoutubeLinkGenerator/v1' // pinned into the child env below
 
 let dir, pool, log, canaryLog
+
+// The harvester's canaries. Mirrored here rather than imported because harvest.mjs is
+// a script, not a module; 'mechanism canary' asserts this mirror against the source.
+const CANARIES = {
+  '2s34x': '2s34x-mt1wk',
+  '7cbrv9h': '7Cbrv9h-0cY',
+  xvp3n9h: 'xVp3N9h-DQY',
+}
 
 /** A stand-in for lib/youtube.mjs: deterministic, offline, and instrumented. */
 const STUB = `
@@ -66,14 +78,25 @@ const buckets = []
 // videosMeta succeed after a search QuotaExceeded, which no real run can do.
 let quotaGone = false
 let metaCalls = 0
+const CANARIES = ${JSON.stringify(CANARIES)}
+// Canary tokens whose video is "gone": the search answers, but without the target.
+// '*' makes every canary miss, which is what a changed tokenizer looks like.
+const canaryGone = (process.env.STUB_CANARY_MISSING ?? '').split(',').filter(Boolean)
 export async function searchPage(key, q, pageToken) {
-  // The canary runs first and must resolve, or harvest aborts before the loop.
-  // Logged to its OWN file: the bucket log below cannot distinguish "checked before the
+  // The canaries run first and one must resolve, or harvest aborts before the loop.
+  // Logged to their OWN file: the bucket log below cannot distinguish "checked before the
   // canary" from "checked after it", so a regression that burns the canary's 100 units
   // before failing shipped green. Anything asserting ordering needs this marker.
-  if (q === 'my8exz') {
-    appendFileSync(process.env.STUB_CANARY_LOG, 'canary\\n')
-    return { ids: ['my8EXZ-mqpQ'], nextPageToken: null, totalResults: 1 }
+  // Only while no bucket has been queried yet: a canary token is a legal 5-char prefix,
+  // so the same string drawn later as a bucket must be served as a bucket.
+  if (q in CANARIES && buckets.length === 0) {
+    appendFileSync(process.env.STUB_CANARY_LOG, q + '\\n')
+    const gone = canaryGone.includes('*') || canaryGone.includes(q)
+    return {
+      ids: [gone ? 'nothing-here' : CANARIES[q]],
+      nextPageToken: null,
+      totalResults: 1,
+    }
   }
   calls++
   if (quotaGone) throw new QuotaExceeded('stub quota (still exhausted)')
@@ -164,8 +187,13 @@ const pooled = () =>
     .map((r) => r.id)
 const queried = () =>
   existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []
-/** Whether the canary search actually went out — the 100 units a pre-flight must save. */
+/** Whether any canary search actually went out — the 100 units a pre-flight must save. */
 const canaryRan = () => existsSync(canaryLog)
+/** The canary tokens probed, in order. */
+const canariesProbed = () =>
+  existsSync(canaryLog)
+    ? readFileSync(canaryLog, 'utf8').split('\n').filter(Boolean)
+    : []
 
 /** The invariant: nothing below the counter may be unqueried. */
 function assertNoGaps(priorCounter, newCounter) {
@@ -440,7 +468,7 @@ describe('escape hatch cannot be turned into a silencer', () => {
   it('keeps the stored baseline when the run is too small to relearn', () => {
     seed({ baselineYield: 5 })
     const r = run({
-      HARVEST_UNITS: '600',
+      HARVEST_UNITS: '800',
       STUB_PER_BUCKET: '4',
       HARVEST_BASELINE_RESET: '1',
     })
@@ -497,12 +525,26 @@ describe('escape hatch cannot be turned into a silencer', () => {
 // START a bucket without MAX_PAGES+1 pages (400) in reserve, so it planned work it could
 // never run. That is the "succeeds while producing nothing" failure this project exists
 // to design against, so it is now fatal and detected before any API call.
+//
+// The floor is 700, not 500: three canaries (300 worst case) plus the 400 reserve. Sized
+// for the usual single canary search, a 500 budget would harvest nothing on a night the
+// first canary video is gone — the fallback resolving on the second probe leaves 300.
 describe('budget floor', () => {
   it('refuses a budget too small to start a single bucket', () => {
     seed()
     const r = run({ HARVEST_UNITS: '300' })
     expect(r.code, 'a run that cannot harvest must not report success').toBe(1)
     expect(r.out).toMatch(/cannot harvest anything/)
+  })
+
+  it('counts every canary against the floor, not just the first', () => {
+    seed()
+    // 500 was the floor when there was one canary. With three it is one miss away
+    // from a zero-bucket run that reports ok, so it must be refused up front.
+    const r = run({ HARVEST_UNITS: '500' })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/cannot harvest anything/)
+    expect(canaryRan()).toBe(false)
   })
 
   it('refuses before spending anything on the API', () => {
@@ -517,7 +559,7 @@ describe('budget floor', () => {
 
   it('does run the canary when the budget is usable', () => {
     seed()
-    run({ HARVEST_UNITS: '500' })
+    run({ HARVEST_UNITS: '700' })
     expect(canaryRan(), 'otherwise the assertion above proves nothing').toBe(
       true,
     )
@@ -526,17 +568,79 @@ describe('budget floor', () => {
   it('names the minimum that would work', () => {
     seed()
     expect(run({ HARVEST_UNITS: '300' }).out).toMatch(
-      /minimum useful budget is 500/,
+      /minimum useful budget is 700/,
     )
   })
 
   it('allows the smallest budget that can actually run a bucket', () => {
     seed()
-    const r = run({ HARVEST_UNITS: '500' })
-    expect(r.code, '500 is exactly canary + one bucket reserve').toBe(0)
-    // The stub does not log the canary, so this counts real buckets. Exactly one fits:
-    // the first search leaves 300, below the 400 reserve, so the loop stops there.
+    // The worst case the floor is sized for: only the LAST canary resolves, so all 300
+    // canary units are spent before the loop starts.
+    const r = run({
+      HARVEST_UNITS: '700',
+      STUB_CANARY_MISSING: '2s34x,7cbrv9h',
+    })
+    expect(r.code, '700 is exactly all canaries + one bucket reserve').toBe(0)
+    // The bucket log never sees a canary, so this counts real buckets. Exactly one
+    // fits: the first search leaves 300, below the 400 reserve, so the loop stops.
     expect(queried().length, 'the floor must permit exactly one bucket').toBe(1)
+  })
+})
+
+// 2026-10-22: the single canary video went private. The run declared the mechanism
+// broken and suspended harvesting, while the other known dash-token IDs still resolved
+// and random prefixes still yielded. A canary is a video and videos go away; only the
+// tokenizer changing may stop the harvest, and that looks like EVERY canary missing.
+describe('mechanism canary', () => {
+  // The stub's mirror must be the harvester's list, token AND id, in the same order:
+  // the probes-in-order assertions below prove nothing against a drifted mirror, and
+  // a matching typo in both would pass. Read from the source since it is a script.
+  it("the test stub mirrors the harvester's canary list exactly", () => {
+    const src = readFileSync(join(ROOT, 'scripts', 'harvest.mjs'), 'utf8')
+    const block = src.match(/const CANARIES = \[([^\]]*)\]/)
+    expect(block, 'CANARIES must stay a literal array').not.toBeNull()
+    const live = [...block[1].matchAll(/token: '([^']+)', id: '([^']+)'/g)].map(
+      (m) => [m[1], m[2]],
+    )
+    expect(live).toEqual(Object.entries(CANARIES))
+    // The harvester's own query shape first (see the comment on CANARIES).
+    expect(live[0][0]).toHaveLength(PREFIX_LENGTH)
+  })
+
+  it('stops at the first canary that resolves', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '1200' })
+    expect(r.code).toBe(0)
+    expect(canariesProbed()).toEqual(['2s34x'])
+    expect(manifest().health.canaryMisses).toBe(0)
+  })
+
+  it('falls back to the next canary when one video is gone', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '1200', STUB_CANARY_MISSING: '2s34x' })
+    expect(r.code, 'one dead video must not suspend harvesting').toBe(0)
+    expect(canariesProbed()).toEqual(['2s34x', '7cbrv9h'])
+    expect(state().counter, 'the run must actually harvest').toBeGreaterThan(0)
+    // The miss must be visible, or the dead canary costs 100 units a night forever.
+    expect(r.out).toMatch(/canary "2s34x" no longer returns 2s34x-mt1wk/)
+    expect(r.out).toMatch(/rotate/)
+    expect(manifest().health.status).toBe('ok')
+    expect(manifest().health.canaryMisses).toBe(1)
+  })
+
+  it('declares the mechanism broken only when every canary misses', () => {
+    seed()
+    const r = run({ HARVEST_UNITS: '1200', STUB_CANARY_MISSING: '*' })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/none of the 3 canaries resolved/)
+    expect(r.out).toMatch(/mechanism has changed/)
+    expect(canariesProbed()).toEqual(['2s34x', '7cbrv9h', 'xvp3n9h'])
+    expect(queried(), 'nothing may be harvested on a broken mechanism').toEqual(
+      [],
+    )
+    expect(state().counter).toBe(0)
+    expect(manifest().health.status).toBe('mechanism-broken')
+    expect(manifest().health.canaryMisses).toBe(3)
   })
 })
 
@@ -685,8 +789,11 @@ describe('what enters the pool', () => {
   // whole, so it must be treated as truncation rather than waved through as deletions.
   it('treats a confirmation without enough controls as inconclusive', () => {
     // One bucket of two; one member missing leaves a single id to use as a control.
+    // Exactly one bucket: the floor is 700 and two canary misses spend 300 of it, so
+    // the loop has one bucket's reserve and no more.
     const r = run({
-      HARVEST_UNITS: '500',
+      HARVEST_UNITS: '700',
+      STUB_CANARY_MISSING: '2s34x,7cbrv9h',
       STUB_META_GONE_AT: '1',
       STUB_META_GONE_COUNT: '1',
     })
