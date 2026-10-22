@@ -75,9 +75,28 @@ const BASELINE_RESET = process.env.HARVEST_BASELINE_RESET === '1'
 // which is the frame-shrinking P0 this file warns about below.
 const FEISTEL_KEY = process.env.HARVEST_KEY || 'RandomYoutubeLinkGenerator/v1'
 
-// A known dash-token ID. If this stops resolving, YouTube changed the tokenizer and
-// every downstream number is meaningless — this is the one check that catches it.
-const CANARY = { token: 'my8exz', id: 'my8EXZ-mqpQ' }
+// Known dash-token IDs, probed in order until one resolves. If NONE resolves, YouTube
+// changed the tokenizer and every downstream number is meaningless — this is the one
+// check that catches it.
+//
+// There is a list, not a single ID, because a canary is also just a video, and videos
+// go away. On 2026-10-22 the only canary (my8EXZ-mqpQ) went private: the run declared
+// the mechanism broken and suspended harvesting, while the other known IDs still
+// resolved and random prefixes still yielded in-bucket videos. A video disappearing is
+// routine; the tokenizer changing is not; only the latter may stop the harvest. A miss
+// is still reported — in the log and in the health record — so a dead canary gets
+// rotated instead of costing 100 units every night. See docs/OPERATIONS.md.
+//
+// Order matters, because probing stops at the first hit. The 5-character token goes
+// first: it is the exact shape of query the harvester sends, so it is the probe that
+// would notice a tokenizer change confined to short tokens. The longer tokens are
+// fallbacks. Keep this the same list, in the same order, as KNOWN in
+// verify-mechanism.mjs and the stub in tests/harvest-counter.test.mjs.
+const CANARIES = [
+  { token: '2s34x', id: '2s34x-mt1wk' },
+  { token: '7cbrv9h', id: '7Cbrv9h-0cY' },
+  { token: 'xvp3n9h', id: 'xVp3N9h-DQY' },
+]
 
 const key = loadKey()
 let units = 0
@@ -110,34 +129,55 @@ let freshHole = false
 let freshNew = 0
 // What enrichment did with what search found. Declared here for the same TDZ reason.
 let enrichShape = {}
+// Canaries that did not resolve before one did. Non-zero means a canary video is gone
+// and should be rotated; it is recorded in the health record so it is seen at promotion.
+let canaryMisses = 0
 
 // The loop refuses to START a bucket without MAX_PAGES+1 searches in reserve, so that a
 // bucket it begins can always be paged to exhaustion — a partial bucket is truncated in
 // relevance order and would reintroduce popularity bias (§3.3.3). A budget below the
-// canary plus that reserve therefore cannot harvest anything at all: it spends the
-// canary's units and stops, every night, reporting success. Refuse up front instead.
+// canaries plus that reserve therefore cannot harvest anything at all: it spends the
+// canaries' units and stops, every night, reporting success. Refuse up front instead.
 //
-// This is checked BEFORE the canary so a misconfigured budget costs nothing to detect.
+// The canary cost is the WORST case — every canary probed — not the usual one search.
+// Sized for one search, a budget of exactly the floor would, on a night the first canary
+// video is gone, resolve on the second, have less than a bucket's reserve left, start
+// nothing, and exit 0: the fallback would have reintroduced the very failure this floor
+// exists to prevent.
+//
+// This is checked BEFORE the canaries so a misconfigured budget costs nothing to detect.
 const BUCKET_RESERVE = COST.search * (MAX_PAGES + 1)
-const MIN_USEFUL_BUDGET = COST.search + BUCKET_RESERVE
+const CANARY_RESERVE = COST.search * CANARIES.length
+const MIN_USEFUL_BUDGET = CANARY_RESERVE + BUCKET_RESERVE
 if (UNIT_BUDGET < MIN_USEFUL_BUDGET) {
   console.error(
     `FATAL: HARVEST_UNITS=${UNIT_BUDGET} cannot harvest anything. Starting one bucket ` +
       `needs ${BUCKET_RESERVE} units in reserve (MAX_PAGES=${MAX_PAGES}) on top of the ` +
-      `canary's ${COST.search}, so the minimum useful budget is ${MIN_USEFUL_BUDGET}. ` +
-      `A smaller budget burns the canary and harvests zero buckets every run.`,
+      `canaries' ${CANARY_RESERVE} (${CANARIES.length} probes, worst case), so the ` +
+      `minimum useful budget is ${MIN_USEFUL_BUDGET}. A smaller budget burns the ` +
+      `canaries and harvests zero buckets every run.`,
   )
   process.exit(1)
 }
 
 // --- canary -----------------------------------------------------------------
-// Deliberately uninitialised: every path through the catch below either exits the
-// process or rethrows, so a default value would never be observed.
-let canaryOk
+// Probed in order, stopping at the first hit: the usual cost is one search, and the
+// worst case (all gone, or the mechanism broken) is CANARY_RESERVE.
+let canaryOk = false
 try {
-  const { ids } = await searchPage(key, CANARY.token)
-  spend(COST.search)
-  canaryOk = ids.includes(CANARY.id)
+  for (const { token, id } of CANARIES) {
+    const { ids } = await searchPage(key, token)
+    spend(COST.search)
+    if (ids.includes(id)) {
+      canaryOk = true
+      break
+    }
+    canaryMisses++
+    console.warn(
+      `canary "${token}" no longer returns ${id} — the video is probably gone, not ` +
+        `the mechanism; rotate it (docs/OPERATIONS.md). Trying the next canary.`,
+    )
+  }
 } catch (err) {
   if (err instanceof ApiKeyError) {
     console.error(`FATAL: ${err.message}`)
@@ -151,7 +191,8 @@ try {
 }
 if (!canaryOk) {
   console.error(
-    `FATAL: canary "${CANARY.token}" no longer returns ${CANARY.id}.`,
+    `FATAL: none of the ${CANARIES.length} canaries resolved ` +
+      `(${CANARIES.map((c) => c.token).join(', ')}).`,
   )
   console.error(
     'The dash-token mechanism has changed. Harvesting is suspended.',
@@ -159,7 +200,11 @@ if (!canaryOk) {
   recordHealth('mechanism-broken', 0, null)
   process.exit(1)
 }
-console.log('canary OK')
+console.log(
+  canaryMisses === 0
+    ? 'canary OK'
+    : `canary OK after ${canaryMisses} miss(es) — rotate the dead canary`,
+)
 
 // --- plan the run -----------------------------------------------------------
 const affordable = Math.floor(remaining() / COST.search)
@@ -672,6 +717,7 @@ function recordHealth(status, buckets, y, extra = {}) {
     lastRunUtc: runStarted.toISOString(),
     buckets,
     yield: y,
+    canaryMisses,
     // Slow-moving so the gate adapts to real drift rather than firing on noise. When a
     // run cannot learn, the STORED value is kept rather than `prior` — otherwise a reset
     // on a run too small to relearn would erase the baseline and leave the gate off

@@ -16,8 +16,8 @@ You cannot enumerate YouTube. Video IDs are 11 base64url characters, so the spac
 about **one time in 1.2 billion**.
 
 The trick this project uses: **YouTube's search tokenizes video IDs on the `-` character**,
-and matches those tokens case-insensitively. Searching `my8exz` returns the video whose ID
-is `my8EXZ-mqpQ`. So a random 5-character prefix retrieves the complete bucket of videos
+and matches those tokens case-insensitively. Searching `7cbrv9h` returns the video whose
+ID is `7Cbrv9h-0cY`. So a random 5-character prefix retrieves the complete bucket of videos
 whose IDs begin with it, and taking every member of a randomly chosen bucket gives a
 uniform sample.
 

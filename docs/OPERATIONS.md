@@ -100,12 +100,37 @@ keeping `main` clean and the data auditable.
 Failures open (or comment on) a GitHub issue labelled `harvester-health`, which emails you.
 Start with the run log and match the symptom:
 
-### "canary no longer returns …" — the mechanism broke
+### "none of the N canaries resolved" — the mechanism broke
 
 The most serious failure. YouTube changed how it tokenizes video IDs, and every downstream
 number is now meaningless. **Do not** work around it. Re-run `node scripts/verify-mechanism.mjs`
 by hand to confirm, then reassess the method in `docs/DESIGN.md` before harvesting again.
 The pool already collected stays valid.
+
+Before concluding that, rule out the mundane cause below: three canary videos all
+disappearing at once is unlikely but not impossible, and the verifier's third section
+(random-prefix yield) is the tiebreaker. If random prefixes still return in-bucket videos,
+the mechanism works and the canaries are simply all gone — rotate them.
+
+### "canary … no longer returns … rotate it" — a canary video is gone
+
+Status stays `ok`, the run harvested normally, `health.canaryMisses` in the manifest is
+non-zero, and the workflow comments on a "canary video is gone" issue so it is not missed.
+One of the known dash-token videos is private or deleted: that is a video
+going away, not the tokenizer changing, and the run fell back to the next canary. (The
+original lone canary, `my8EXZ-mqpQ`, went private on 2026-10-22 and suspended a night's
+harvest; that is why there are now three, and why a single miss is not fatal.)
+
+Rotate it, or every night pays 100 units for a search that cannot succeed:
+
+1. Confirm it is the video: `curl -s -o /dev/null -w '%{http_code}\n' 'https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=<id>&format=json'`
+   answers 200 for a public video, 403 for a private one, 404 for a deleted one.
+2. Pick a replacement from the pool: an old, well-viewed, embeddable, public video whose
+   5-character bucket holds only itself, so the token search returns exactly it. Confirm
+   with oEmbed and with one `searchPage(key, token)` call (100 units).
+3. Replace the entry in **both** `CANARIES` in `scripts/harvest.mjs` and `KNOWN` in
+   `scripts/verify-mechanism.mjs`, and the mirror in `tests/harvest-counter.test.mjs`.
+   Record the change in the §3.1 table of `docs/DESIGN.md`.
 
 ### "API key problem: keyInvalid / accessNotConfigured"
 
@@ -402,7 +427,7 @@ one is for the rare case above.
 
 ```bash
 npm run harvest                      # spend the default 9000 units
-HARVEST_UNITS=1000 npm run harvest   # a small run (500 is the minimum that works)
+HARVEST_UNITS=1000 npm run harvest   # a small run (700 is the minimum that works)
 npm run revalidate                   # sweep for dead/removed videos
 npm run pool-stats                   # print the figures quoted in RANDOMNESS.md
 node scripts/check-pool.mjs          # structural invariants
