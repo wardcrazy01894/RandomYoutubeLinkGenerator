@@ -502,6 +502,12 @@ footer {
 .muted {
   color: var(--muted);
 }
+/* Studio credit: the last line of the page, smaller than the fine print. */
+.credit {
+  margin-top: 1.25rem;
+  font-size: 0.78rem;
+  text-align: center;
+}
 
 @media (max-width: 480px) {
   .result {
