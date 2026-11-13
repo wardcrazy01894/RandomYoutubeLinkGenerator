@@ -231,8 +231,17 @@
     "nW3CN-e5ve0",
     "dgufH-GAAU0",
     "RW0Q5-iuCeo",
-    "YzRTN-DIXpM"
+    "YzRTN-DIXpM",
+    "zXyc6-lX2c8",
+    "kd7Op-9dnpQ",
+    "5sBLf-Kfeys",
+    "2tuHz-GpJUQ",
+    "O8kMB-7vC1A",
+    "LgIoz-c31bU",
+    "5nEZz-K2_Q4",
+    "bb6Ax-iSdcQ",
+    "h4Kkp-VZBGU"
   ],
   "note": "Video IDs the re-validation sweep found deleted or made private. Only permanent states are recorded here: embeddability and age-restriction are governed by the safe-mode toggle, so tombstoning them would convert a filter the viewer can lift into a removal they cannot. Shards are immutable, so removals live here rather than being edited out.",
-  "updatedAt": "2026-11-12T16:49:34.058Z"
+  "updatedAt": "2026-11-13T16:23:42.366Z"
 }
