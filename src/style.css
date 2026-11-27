@@ -520,6 +520,8 @@ footer {
 }
 .credit a:hover,
 .credit a:focus-visible {
+  /* Restated so `.fine a:hover` (which brightens links) doesn't win here. */
+  color: inherit;
   text-decoration: underline;
 }
 
